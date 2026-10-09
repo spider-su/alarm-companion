@@ -1,78 +1,85 @@
 # Alarm Companion
 
-An offline-first Expo / React Native prototype for gentle wake-up alarms and spoken routine reminders. The first launch includes three editable examples. They are disabled until the user enables them.
+Offline-first Expo / React Native alarm and routine reminder app. Routine settings are stored on the device. The bundled sound samples and Android playback path work without network access.
 
-## What works in this prototype
+## Android support and behavior
 
-- Create, edit, enable, disable, and delete routines; routines persist in device-local storage.
-- Choose an alarm, voice reminder, or sleep reminder; time, one-time/daily/weekday/custom-day repeat, intro sound, message, language, Android TTS voice, tone, speed, pitch, fade, and snooze interval.
-- Preview a locally bundled sound-to-voice sequence. The five small WAV loops are original synthesized sound textures and require no network connection.
-- Schedule repeating local notifications, including a notification when an alarm routine fires. Tapping an alarm notification opens the in-app active alarm view; snooze schedules a one-time follow-up notification and dismiss stops preview playback.
-- Set defaults for new routines (voice language, tone, intro sound, fade), check notification permission and installed English/Polish TTS voices, and preview voice or the full audio sequence.
+- Android API 24+ (project minimum); built against API 36. The Android alarm implementation uses platform `AlarmManager`, exact alarms when access is granted, notification actions, and a `mediaPlayback` foreground service.
+- Exact-alarm access is special app access on Android 12+. Without it, wake-up alarms are scheduled inexactly and Android may delay them. Android 14+ may restrict full-screen alarm intents; when unavailable, the alarm notification remains the entry point.
+- Android 13+ notification permission is requested when a routine is enabled. Denial prevents the app from completing that enable action; the user can grant it later in Settings.
+- Device battery policies, DND, volume, vendor task-killers, and system TTS availability remain outside the app's control. Alarm delivery cannot be guaranteed on every device.
+- iOS and web keep the original Expo notification and JavaScript audio preview path. Reliable native scheduling and foreground playback are Android-only.
 
-## Run locally
+## Alarm architecture
 
-Requires Node.js/npm and Android Studio with an Android SDK/emulator for native Android runs.
+- `modules/alarm-companion`: Expo local native module with `AlarmManager`, stable explicit broadcast PendingIntents, recovery receiver, alarm action receiver, lock-screen activity, notification channels, and foreground playback service.
+- `plugins/withAlarmCompanion.js`: declares native components/permissions and copies the offline WAV assets into Android resources during prebuild.
+- `src/native/alarmCompanion.ts`: typed bridge for routine synchronization, capability checks, preview, snooze, and dismissal.
+- `src/data/routines.ts`: routine shape and AsyncStorage persistence. Native scheduling state is derived from this data and stored only to recover already-armed occurrences and snoozes across reboot.
+- `src/audio/sequence.ts` routes Android preview to the same native playback service and engine used for scheduled alarms. Other platforms retain their existing Expo audio/TTS implementation.
 
-```sh
-npm ci
-npm run android
-```
+Daily, weekday, custom weekday, and once schedules are evaluated using device local wall-clock time. A time-zone or system-clock change cancels and calculates the next local occurrence again. Editing, disabling, and deleting routines synchronizes or cancels their stable alarm identities. Reboot, package replacement, time changes, and exact-access changes restore schedules idempotently.
 
-For Metro development, `npm start` then press `a`. After installing a development build, use `npm run ci` for typecheck, lint, and unit tests. Expo Go does not include all native modules used here; use a development/native build.
+**Missed one-time policy:** if a one-time alarm's stored trigger time passed while the device was off or the app was unavailable, recovery expires it and disables that occurrence. It will not ring hours later. Recurring routines continue at their next local wall-clock occurrence.
 
-## Architecture
+## Playback and reminders
 
-- `src/screens/HomeScreen.tsx`: routine list/editor, local notification scheduling, alarm notification response, and active alarm actions.
-- `src/data/routines.ts`: routine model, disabled demo data, and AsyncStorage persistence.
-- `src/data/schedule.ts`: local wall-clock occurrence and snooze calculations.
-- `src/audio/sequence.ts`: bundled audio playback, fade, native speech, voice/language fallback, and cleanup.
-- `src/screens/SettingsScreen.tsx`: notification permission, TTS availability, and voice test.
-- `assets/sounds/`: generated offline loop samples.
+An alarm starts the bundled nature loop, fades it in, waits the configured intro interval, ducks the loop while Android TTS speaks, then restores the loop until Snooze or Dismiss. Alarms continue in the foreground service when the screen is off. TTS uses the selected installed voice when available, then the requested language, then the system default. A bundled chime is used when a selected sound cannot be loaded. Only one playback session runs at a time; a newer trigger replaces the active session.
 
-No account, API, analytics SDK, or backend is used.
+Snooze stops playback and schedules one replacement after the configured interval; the original repeating occurrence remains scheduled. Dismiss stops playback, removes the active notification, cancels the snooze, and leaves the next recurring occurrence intact.
 
-## Android permissions
+Reminders offer **Notification only**, **Notification + sound**, and **Notification + spoken message**. They never request an automatic full-screen launch and playback ends automatically. If exact access is unavailable, sound/speech reminders fall back to the notification. Android notification permission and exact-alarm/full-screen capability status are shown in Settings.
+
+## Permissions
 
 | Permission | Purpose |
 |---|---|
-| `POST_NOTIFICATIONS` | Required on Android 13+ to show scheduled reminders and alarm notifications. The app asks when the user first enables a routine. |
-| `VIBRATE` | Allows the routine notification channel to use a brief vibration pattern. |
-| `MODIFY_AUDIO_SETTINGS` | Added by `expo-audio` for audio playback and focus behavior. |
-| `RECEIVE_BOOT_COMPLETED` | Added by `expo-notifications`; its native receiver restores scheduled local notifications after reboot. This has not been verified on a device. |
-| `INTERNET` | Included by the React Native/Expo base for development tooling and Metro. The app has no API or network data flow. |
-| `ACCESS_NETWORK_STATE`, `WAKE_LOCK`, `com.google.android.c2dm.permission.RECEIVE` | Declared by the Expo notification/Firebase dependency stack. Remote push is not configured by this prototype. |
-| `com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE` | Dependency manifest declaration; the app does not read install attribution. |
-| OEM launcher badge permissions (`com.sec.android.provider.badge.*`, `com.htc.launcher.*`, `com.sonyericsson.home.*`, `com.sonymobile.home.*`, `com.anddoes.launcher.*`, `com.majeur.launcher.*`, `com.huawei.android.launcher.*`, `com.oppo.launcher.*`, `me.everything.badger.permission.BADGE_COUNT_*`, `android.permission.READ_APP_BADGE`) | Included by notification badge compatibility code; the app does not set a badge count. |
-| `com.spidersu.alarmcompanion.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` | App-scoped signature permission added by Android tooling for internal dynamic receivers. |
+| `POST_NOTIFICATIONS` | Show alarm/reminder notifications on Android 13+. |
+| `SCHEDULE_EXACT_ALARM` | User-controlled exact schedule access on Android 12+. This is not requested during onboarding. |
+| `USE_FULL_SCREEN_INTENT` | Alarm-only lock-screen activity where Android permits it. |
+| `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK` | Keep alarm audio/TTS alive while the screen is off. |
+| `RECEIVE_BOOT_COMPLETED` | Rebuild scheduled alarms after device reboot. |
+| `VIBRATE` | Platform notification vibration behavior. |
 
-The config blocks `SYSTEM_ALERT_WINDOW`, `READ_EXTERNAL_STORAGE`, and `WRITE_EXTERNAL_STORAGE`; none is needed by this app. It does not request `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`, full-screen intent, or foreground-service permissions. Android may delay local notifications under battery restrictions, and the app cannot wake into a full-screen alarm over the lock screen. Expo Notifications restores scheduled notifications after reboot, but this has not been device-verified. Android TTS uses the system's installed engine and voice data; unavailable languages fall back to the installed system default. Android DND and device volume policy remain under system control.
+The app does not request overlay or storage permissions. Android controls DND, silent mode, lock-screen privacy, exact-alarm eligibility, and full-screen intent availability.
 
-## Verification status and manual device checklist
+## Run and build
 
-Automated tests cover weekday/once calculations, DST wall-clock behavior, snooze arithmetic, demo defaults, and local persistence. They do not prove Android notification delivery, audio focus, or locked-screen behavior. No physical-device validation is claimed.
+Requires Node.js/npm, Android Studio/SDK, and JDK 17 for the current Android native build.
 
-- [ ] Alarm while app is open.
-- [ ] Alarm while app is backgrounded.
-- [ ] Alarm while phone is locked.
+```sh
+npm ci
+npm run ci
+npx expo prebuild --platform android
+npm run android
+```
+
+To build a debug APK with JDK 17:
+
+```sh
+JAVA_HOME=/path/to/jdk-17 PATH=/path/to/jdk-17/bin:$PATH ./android/gradlew -p android assembleDebug
+```
+
+The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
+
+## Verification and manual Android checklist
+
+Automated checks cover TypeScript, lint, routine persistence, JS schedule/snooze calculations, and native local-calendar schedule calculations for daily, weekday, custom-day, DST, and time-zone cases. The Android debug APK build compiles the native module and manifest. These checks do not prove AlarmManager, notification, audio, or lock-screen behavior on a physical Android device.
+
+- [ ] Alarm in 2 minutes with app open.
+- [ ] Alarm in 2 minutes with app backgrounded.
+- [ ] Alarm while screen is locked; verify full-screen policy and fallback notification.
+- [ ] Alarm after app process termination.
 - [ ] Alarm after device reboot.
-- [ ] Snooze and dismiss.
-- [ ] Notification permission denied.
-- [ ] Exact-alarm permission denied (current fallback is a standard local notification; the app does not request exact-alarm access).
-- [ ] Selected TTS voice unavailable; verify system voice fallback.
-- [ ] No network connection.
-- [ ] Multiple reminders scheduled close together.
-- [ ] Phone in silent and Do Not Disturb modes.
-- [ ] App process terminated by Android.
+- [ ] Snooze twice, then dismiss.
+- [ ] Edit an existing alarm and confirm only the new time fires.
+- [ ] Disable an alarm and confirm it does not fire.
+- [ ] Delete an alarm and confirm it does not fire.
+- [ ] Two alarms close together; verify the active playback replacement and actions.
+- [ ] Notification-only reminder while locked.
+- [ ] Spoken reminder while backgrounded; verify automatic finish.
+- [ ] Silent mode and Do Not Disturb.
+- [ ] Deny notification/exact-alarm access, then grant it and retry.
+- [ ] Offline operation.
 
-## Known limitations
-
-- Expo local notifications are used instead of `AlarmManager` exact alarms. The active alarm view appears after the user opens/taps the notification and is not a full-screen lock-screen alarm.
-- Reminder notifications are standard notifications; speech does not start automatically from the background.
-- Time-zone/system-clock rescheduling and Android process-death recovery are not device-verified.
-- Audio and TTS preview are functional while the app is running; scheduled notification playback does not run the sound-to-voice sequence autonomously.
-- Product colors adapt to the system light/dark setting; native controls follow Android's theme behavior.
-
-## Next milestone
-
-Add a small native Android module for `AlarmManager`, exact-alarm permission guidance, reboot/time-change rescheduling, foreground audio playback, and lock-screen alarm actions. Keep the Expo UI, data model, and preview engine, then validate the complete flow on Android devices across permission and DND states before claiming reliability.
+No physical Android device or emulator was available during implementation; the build is ready for device validation, not verified for end-to-end reliability.

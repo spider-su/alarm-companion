@@ -1,5 +1,7 @@
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import * as Speech from 'expo-speech';
+import { Platform } from 'react-native';
+import { previewNativeRoutine, stopNativePlayback } from '../native/alarmCompanion';
 import type { Routine } from '../data/routines';
 import birds from '../../assets/sounds/birds.wav';
 import rain from '../../assets/sounds/rain.wav';
@@ -16,6 +18,12 @@ const tones: Record<Routine['tone'], { rate: number; pitch: number }> = {
 };
 
 export async function playSequence(routine: Routine, onState: (message: string) => void): Promise<() => void> {
+  if (Platform.OS === 'android') {
+    await previewNativeRoutine(routine);
+    onState(`Playing ${routine.sound === 'none' ? 'voice' : routine.sound}…`);
+    let stopped = false;
+    return () => { if (!stopped) { stopped = true; void stopNativePlayback(); onState('Playback stopped'); } };
+  }
   await Speech.stop();
   await setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: false, interruptionMode: 'duckOthers' });
   let stopped = false;
