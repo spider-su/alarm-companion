@@ -4,17 +4,18 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Calendar
 import java.util.TimeZone
+import java.io.File
 
 object NativeAlarmScheduler {
   private const val PREFS = "alarm_companion_native_v1"
   private const val ROUTINES = "routines"
   private const val COMPLETED = "completed"
-  private const val SNOOZES = "snoozes"
   data class Routine(val id: String, val name: String, val type: String, val time: String, val repeat: String, val days: Set<Int>, val enabled: Boolean, val reminderBehavior: String, val source: JSONObject)
 
   fun sync(context: Context, json: String): Map<String, Any> {
@@ -72,7 +73,21 @@ object NativeAlarmScheduler {
     if (type == "alarm" && !capabilities(context)["exactAlarms"].toString().toBoolean()) { AlarmNotifications.postAlarmFallback(context, routine); return }
     if (type != "alarm" && behavior == "notification-only") { AlarmNotifications.postReminder(context, routine); return }
     if (type != "alarm" && !capabilities(context)["exactAlarms"].toString().toBoolean()) { AlarmNotifications.postReminder(context, routine); return }
-    AlarmPlaybackService.start(context, routine, type == "alarm")
+    val playback = playbackCopy(routine)
+    if (!AlarmPlaybackService.start(context, playback, type == "alarm") && type != "alarm") AlarmNotifications.postReminder(context, routine)
+  }
+
+  fun playbackCopy(routine: JSONObject): JSONObject {
+    val playback = JSONObject(routine.toString())
+    val recordings = playback.optJSONArray("recordings")
+    val usable = (0 until (recordings?.length() ?: 0)).mapNotNull { recordings?.optJSONObject(it) }
+      .filter { item -> runCatching { Uri.parse(item.optString("uri")).path?.let(::File)?.canRead() == true }.getOrDefault(false) }
+    if (usable.isNotEmpty()) playback.put("selectedRecordingUri", usable[(Math.random() * usable.size).toInt()].optString("uri"))
+    else if (playback.optJSONObject("voiceProfile")?.optString("kind") == "recording") playback.put("recordingUnavailable", true)
+    val variants = playback.optJSONArray("messageVariants")
+    val messages = (0 until (variants?.length() ?: 0)).mapNotNull { variants?.optJSONObject(it)?.optString("text")?.takeIf(String::isNotBlank) }
+    if (messages.isNotEmpty()) playback.put("selectedMessage", messages[(Math.random() * messages.size).toInt()])
+    return playback
   }
 
   fun snooze(context: Context?, id: String) {

@@ -18,9 +18,7 @@ class AlarmCompanionModule : Module() {
     AsyncFunction("previewRoutine") { json: String ->
       val context = appContext.reactContext ?: return@AsyncFunction false
       AlarmNotifications.ensureChannels(context)
-      val intent = Intent(context, AlarmPlaybackService::class.java).apply { action = AlarmPlaybackService.ACTION_PREVIEW; putExtra("routine", json) }
-      if (android.os.Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
-      true
+      AlarmPlaybackService.start(context, org.json.JSONObject(json), false, true)
     }
     AsyncFunction("stopPlayback") { AlarmPlaybackService.stop(appContext.reactContext) }
     AsyncFunction("dismissAlarm") { id: String -> NativeAlarmScheduler.dismiss(appContext.reactContext, id) }

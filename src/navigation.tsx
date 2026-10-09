@@ -4,6 +4,7 @@ import { useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HomeScreen } from './screens/HomeScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { VoiceLibraryScreen } from './screens/VoiceLibraryScreen';
 import { getTabBarMetrics } from './platform/safeArea';
 
 const Tab = createBottomTabNavigator();
@@ -18,6 +19,7 @@ function Tabs() {
     }}>
       <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Routines', tabBarLabel: 'Routines' }} />
       <Tab.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings', tabBarLabel: 'Settings' }} />
+      <Tab.Screen name="VoiceLibrary" component={VoiceLibraryScreen} options={{ title: 'Voice Library', tabBarLabel: 'Voices' }} />
     </Tab.Navigator>
   );
 }

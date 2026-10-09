@@ -15,7 +15,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: false,
     ...(process.env.IOS_BUNDLE_IDENTIFIER ? { bundleIdentifier: process.env.IOS_BUNDLE_IDENTIFIER } : {})
   },
-  plugins: ['expo-system-ui', 'expo-asset', ['expo-notifications', { defaultChannel: 'routines' }], './plugins/withAlarmCompanion'],
+  plugins: ['expo-system-ui', 'expo-asset', ['expo-audio', { microphonePermission: 'Allow $(PRODUCT_NAME) to record short voice messages.', recordAudioAndroid: true }], ['expo-notifications', { defaultChannel: 'routines' }], './plugins/withAlarmCompanion'],
   android: {
     ...config.android,
     package: process.env.ANDROID_PACKAGE ?? 'com.spidersu.alarmcompanion',

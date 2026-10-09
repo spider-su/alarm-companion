@@ -3,6 +3,9 @@ import * as Speech from 'expo-speech';
 import { Platform } from 'react-native';
 import { previewNativeRoutine, stopNativePlayback } from '../native/alarmCompanion';
 import type { Routine } from '../data/routines';
+import { chooseAvailableRecording, chooseTextVariant, loadVoiceLibrary, resolveTtsSettings } from '../data/voices';
+import { recordingExists } from '../data/recordings';
+import { createPlaybackCleanup, releaseAudioResource } from './playbackCleanup';
 import birds from '../../assets/sounds/birds.wav';
 import rain from '../../assets/sounds/rain.wav';
 import ocean from '../../assets/sounds/ocean.wav';
@@ -12,14 +15,19 @@ import chime from '../../assets/sounds/chime.wav';
 const tracks = {
   birds, rain, ocean, stream, chime
 } as const;
-const tones: Record<Routine['tone'], { rate: number; pitch: number }> = {
-  Gentle: { rate: 0.88, pitch: 0.98 }, Cheerful: { rate: 1.06, pitch: 1.08 },
-  Firm: { rate: 1, pitch: 1 }, Playful: { rate: 1.08, pitch: 1.15 }
-};
-
 export async function playSequence(routine: Routine, onState: (message: string) => void): Promise<() => void> {
+  const library = await loadVoiceLibrary();
+  const profile = library.profiles.find((item) => item.id === (routine.voiceProfileId ?? library.defaultProfileId));
+  if (!profile) throw new Error('This voice profile is unavailable. Choose another profile in the routine editor.');
+  const recording = routine.previewAudioUri ? { uri: routine.previewAudioUri } : chooseAvailableRecording(profile, library.recordings, recordingExists);
+  if (profile.kind === 'recording' && !recording) throw new Error('No accessible recordings remain in this voice profile. Re-import a clip or choose another profile.');
+  if (routine.previewAudioUri && !recordingExists(routine.previewAudioUri)) throw new Error('This recording is missing or inaccessible. Re-import it or choose another profile.');
+  const message = chooseTextVariant(routine.messageVariants, routine.message ?? routine.name);
+  const speech = resolveTtsSettings(profile, routine.ttsOverrides);
+  const resolved: Routine & { selectedMessage?: string; selectedRecordingUri?: string; speechConfig?: typeof speech } = { ...routine, selectedMessage: message, selectedRecordingUri: recording?.uri, speechConfig: speech };
   if (Platform.OS === 'android') {
-    await previewNativeRoutine(routine);
+    const started = await previewNativeRoutine(resolved);
+    if (!started) throw new Error('A wake-up alarm is already active. This preview will not interrupt it.');
     onState(`Playing ${routine.sound === 'none' ? 'voice' : routine.sound}…`);
     let stopped = false;
     return () => { if (!stopped) { stopped = true; void stopNativePlayback(); onState('Playback stopped'); } };
@@ -28,16 +36,20 @@ export async function playSequence(routine: Routine, onState: (message: string) 
   await setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: false, interruptionMode: 'duckOthers' });
   let stopped = false;
   let player: ReturnType<typeof createAudioPlayer> | undefined;
+  let voicePlayer: ReturnType<typeof createAudioPlayer> | undefined;
   let fadeTimer: ReturnType<typeof setInterval> | undefined;
   let introTimer: ReturnType<typeof setTimeout> | undefined;
   let repeatTimer: ReturnType<typeof setTimeout> | undefined;
+  const cleanup = createPlaybackCleanup();
+  cleanup.add(() => { if (fadeTimer) clearInterval(fadeTimer); if (introTimer) clearTimeout(introTimer); if (repeatTimer) clearTimeout(repeatTimer); });
+  cleanup.add(() => { void Speech.stop(); });
+  cleanup.add(() => releaseAudioResource(player));
+  const unregisterVoiceCleanup = cleanup.add(() => releaseAudioResource(voicePlayer));
   const stop = () => {
     stopped = true;
-    if (fadeTimer) clearInterval(fadeTimer);
-    if (introTimer) clearTimeout(introTimer);
-    if (repeatTimer) clearTimeout(repeatTimer);
-    void Speech.stop();
-    if (player) { player.pause(); player.remove(); player = undefined; }
+    cleanup.cancel();
+    player = undefined;
+    voicePlayer = undefined;
     onState('Playback stopped');
   };
   try {
@@ -64,16 +76,26 @@ export async function playSequence(routine: Routine, onState: (message: string) 
       let language: string | undefined;
       try {
         const voices = await Speech.getAvailableVoicesAsync();
-        const selected = voices.find((item) => item.identifier === routine.voice)
-          ?? voices.find((item) => item.language.toLowerCase().startsWith(routine.language.slice(0, 2).toLowerCase()));
+        const selected = voices.find((item) => item.identifier === speech.voice)
+          ?? voices.find((item) => item.language.toLowerCase().startsWith(speech.language.slice(0, 2).toLowerCase()));
         voice = selected?.identifier;
         language = selected?.language;
       } catch { /* Native TTS will use its configured default voice. */ }
       if (stopped) return;
-      const preset = tones[routine.tone];
-      Speech.speak(routine.message, {
-        ...(language ? { language } : {}), ...(voice ? { voice } : {}), rate: routine.speed || preset.rate,
-        pitch: routine.pitch || preset.pitch, volume: routine.voiceVolume,
+      if (recording) {
+        try {
+          voicePlayer = createAudioPlayer(recording.uri);
+          voicePlayer.volume = routine.voiceVolume;
+          voicePlayer.addListener('playbackStatusUpdate', (status) => {
+            if (status.didJustFinish && !stopped) { releaseAudioResource(voicePlayer); unregisterVoiceCleanup(); voicePlayer = undefined; if (player) player.volume = routine.backgroundVolume; onState('Playing background sound'); if (routine.repeatVoice) repeatTimer = setTimeout(() => { void speak(); }, 15_000); }
+          });
+          voicePlayer.play();
+        } catch { onState('Recording playback failed. Re-import the file or choose another profile.'); if (player) player.volume = routine.backgroundVolume; }
+        return;
+      }
+      Speech.speak(message, {
+        ...(language ? { language } : {}), ...(voice ? { voice } : {}), rate: speech.rate,
+        pitch: speech.pitch, volume: routine.voiceVolume,
         onDone: () => {
           if (stopped) return;
           if (player) player.volume = routine.backgroundVolume;
