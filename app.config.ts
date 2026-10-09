@@ -1,7 +1,7 @@
 import type { ExpoConfig, ConfigContext } from 'expo/config';
 
-const appName = process.env.APP_NAME ?? 'Mobile Starter';
-const slug = process.env.APP_SLUG ?? 'mobile-starter';
+const appName = process.env.APP_NAME ?? 'Alarm Companion';
+const slug = process.env.APP_SLUG ?? 'alarm-companion';
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
@@ -15,11 +15,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: false,
     ...(process.env.IOS_BUNDLE_IDENTIFIER ? { bundleIdentifier: process.env.IOS_BUNDLE_IDENTIFIER } : {})
   },
+  plugins: ['expo-system-ui', 'expo-asset', ['expo-notifications', { defaultChannel: 'routines' }]],
   android: {
     ...config.android,
-    ...(process.env.ANDROID_PACKAGE ? { package: process.env.ANDROID_PACKAGE } : {})
+    package: process.env.ANDROID_PACKAGE ?? 'com.spidersu.alarmcompanion',
+    permissions: ['POST_NOTIFICATIONS', 'VIBRATE'],
+    blockedPermissions: ['android.permission.SYSTEM_ALERT_WINDOW', 'android.permission.READ_EXTERNAL_STORAGE', 'android.permission.WRITE_EXTERNAL_STORAGE']
   },
-  plugins: ['expo-system-ui'],
   extra: {
     ...config.extra,
     ...(process.env.EAS_PROJECT_ID
