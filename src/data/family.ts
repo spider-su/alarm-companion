@@ -2,9 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const PROFILE_KEY = 'alarm-companion.family-profiles.v1';
 const HISTORY_KEY = 'alarm-companion.routine-history.v1';
-export type FamilyProfile = { id: string; name: string };
+export type FamilyProfile = { id: string; name: string; motivationalFeedback?: boolean; motivationLanguage?: 'en' | 'pl' };
 export type RoutineEventType = 'scheduled' | 'triggered' | 'dismissed' | 'snoozed' | 'completed' | 'skipped';
-export type RoutineEvent = { id: string; routineId: string; routineName: string; type: RoutineEventType; at: number };
+export type RoutineEvent = { id: string; routineId: string; routineName: string; type: RoutineEventType; at: number; profileId?: string; occurrenceId?: string; routineType?: string; routineCategory?: string; routineTime?: string };
 export function routinesForProfile<T extends { familyProfileId?: string }>(routines: T[], profileId: string): T[] {
   return profileId === EVERYONE.id ? routines : routines.filter((routine) => (routine.familyProfileId ?? EVERYONE.id) === EVERYONE.id || routine.familyProfileId === profileId);
 }
@@ -20,12 +20,28 @@ export async function loadProfiles(): Promise<FamilyProfile[]> {
   } catch { return initialProfiles; }
 }
 export async function saveProfiles(profiles: FamilyProfile[]) { await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profiles.some((p) => p.id === EVERYONE.id) ? profiles : [EVERYONE, ...profiles])); }
-export async function recordRoutineEvent(event: Omit<RoutineEvent, 'id' | 'at'>, now = Date.now()) {
-  const entries = await loadRoutineHistory(now); entries.unshift({ ...event, id: `event-${now}-${Math.random().toString(36).slice(2, 7)}`, at: now });
-  await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, 500)));
+export async function recordRoutineEvent(event: Omit<RoutineEvent, 'id' | 'at'>, now = Date.now()): Promise<RoutineEvent | undefined> {
+  const entries = await loadAllRoutineHistory();
+  if (event.type === 'completed' && event.occurrenceId && entries.some((item) => item.type === 'completed' && item.occurrenceId === event.occurrenceId)) return undefined;
+  const created = { ...event, id: `event-${now}-${Math.random().toString(36).slice(2, 7)}`, at: now };
+  entries.unshift(created);
+  const cutoff = now - 30 * 86400_000;
+  const retained = entries.filter((item) => item.type === 'completed' || item.at >= cutoff);
+  await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(retained));
+  return created;
+}
+export async function loadAllRoutineHistory(): Promise<RoutineEvent[]> {
+  try { const raw = await AsyncStorage.getItem(HISTORY_KEY); return raw ? JSON.parse(raw) as RoutineEvent[] : []; } catch { return []; }
+}
+export async function loadCompletionHistory(): Promise<RoutineEvent[]> { return (await loadAllRoutineHistory()).filter((event) => event.type === 'completed' && (event.routineType === 'reminder' || event.routineType === 'sleep')); }
+export async function undoRoutineCompletion(eventId: string): Promise<RoutineEvent | undefined> {
+  const entries = await loadAllRoutineHistory();
+  const removed = entries.find((event) => event.id === eventId && event.type === 'completed');
+  if (removed) await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(entries.filter((event) => event.id !== eventId)));
+  return removed;
 }
 export async function loadRoutineHistory(now = Date.now()): Promise<RoutineEvent[]> {
-  try { const raw = await AsyncStorage.getItem(HISTORY_KEY); const events = raw ? JSON.parse(raw) as RoutineEvent[] : []; return recentEvents(events, now); } catch { return []; }
+  try { return recentEvents(await loadAllRoutineHistory(), now); } catch { return []; }
 }
 export type RoutineTemplate = { id: string; name: string; type: 'alarm' | 'reminder' | 'sleep'; sound: 'birds' | 'rain' | 'ocean' | 'chime'; time: string; message: string; reminderBehavior: 'notification-only' | 'sound' | 'spoken'; tone: 'Gentle' | 'Cheerful' };
 export const routineTemplates: RoutineTemplate[] = [

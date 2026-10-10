@@ -8,7 +8,9 @@ import { loadDefaults, loadRoutines, saveRoutines, soundLabels, type Routine, ty
 import { loadVoiceLibrary, type VoiceLibrary, type VoiceProfile } from '../data/voices';
 import { nextOccurrence } from '../data/schedule';
 import { playSequence } from '../audio/sequence';
-import { EVERYONE, loadProfiles, loadRoutineHistory, recordRoutineEvent, routinesForProfile, routineTemplates, saveProfiles, type FamilyProfile, type RoutineEvent } from '../data/family';
+import { EVERYONE, loadAllRoutineHistory, loadCompletionHistory, loadProfiles, loadRoutineHistory, recordRoutineEvent, routinesForProfile, routineTemplates, saveProfiles, undoRoutineCompletion, type FamilyProfile, type RoutineEvent } from '../data/family';
+import { achievementCatalog, motivationMessages, progressForProfile, removeDeletedProfileUnlocks, undoCompletionUnlocks, unlockEligibleAchievements } from '../data/motivation';
+import { completionForOccurrence, occurrenceIdForToday } from '../data/completion';
 import { consumeCompletedRoutineIds, consumeNativeRoutineEvents, dismissNativeAlarm, isNativeAlarmAndroid, openExactAlarmSettings, snoozeNativeAlarm, syncNativeRoutines } from '../native/alarmCompanion';
 
 const blank: Routine = { id: '', name: '', type: 'alarm', time: '07:00', repeat: 'once', days: [], enabled: false, messageVariants: [{ id: 'message-default', text: 'Good morning! It is time to wake up.' }], sound: 'birds', introSeconds: 8, fadeSeconds: 30, backgroundVolume: 0.35, voiceVolume: 1, repeatVoice: false, snoozeMinutes: 9, notificationIds: [], reminderCategory: 'Custom', reminderBehavior: 'notification-only' };
@@ -27,6 +29,9 @@ export function HomeScreen() {
   const [profilesOpen, setProfilesOpen] = useState(false);
   const [profileDrafts, setProfileDrafts] = useState<FamilyProfile[]>([]);
   const [history, setHistory] = useState<RoutineEvent[]>([]);
+  const [completionEvents, setCompletionEvents] = useState<RoutineEvent[]>([]);
+  const [celebration, setCelebration] = useState('');
+  const completing = useRef(new Set<string>());
   const [voiceLibrary, setVoiceLibrary] = useState<VoiceLibrary | null>(null);
   const [editing, setEditing] = useState<Routine | null>(null);
   const [activeAlarm, setActiveAlarm] = useState<Routine | null>(null);
@@ -72,6 +77,7 @@ export function HomeScreen() {
         for (const event of nativeEvents) if (['triggered', 'dismissed', 'snoozed'].includes(event.type)) await recordRoutineEvent({ routineId: event.routineId, routineName: event.routineName, type: event.type as RoutineEvent['type'] }, event.at);
       }
       setItems(loaded);
+      setCompletionEvents(await loadCompletionHistory());
       setFamilyProfiles(await loadProfiles());
       setVoiceLibrary(await loadVoiceLibrary());
       void Notifications.getLastNotificationResponseAsync().then((response) => {
@@ -87,6 +93,7 @@ export function HomeScreen() {
   }, []);
   const visibleItems = useMemo(() => routinesForProfile(items, profileFilter), [items, profileFilter]);
   const todayItems = useMemo(() => [...visibleItems].sort((a, b) => a.time.localeCompare(b.time)), [visibleItems]);
+  const profileProgress = progressForProfile(completionEvents, profileFilter);
   const upcoming = useMemo(() => visibleItems.filter((r) => r.enabled).sort((a, b) => nextOccurrence(a).getTime() - nextOccurrence(b).getTime())[0], [visibleItems]);
   async function replaceRoutine(next: Routine) {
     if (!next.name.trim() || !/^([01]\d|2[0-3]):[0-5]\d$/.test(next.time)) {
@@ -107,7 +114,9 @@ export function HomeScreen() {
         if (!permission.granted && !(await Notifications.requestPermissionsAsync()).granted) throw new Error('Notification permission is needed to show alarms and reminders.');
       }
       if (!isNativeAlarmAndroid) for (const id of next.notificationIds) await Notifications.cancelScheduledNotificationAsync(id).catch(() => undefined);
-      const scheduled = { ...next, familyProfileId: next.familyProfileId ?? 'everyone', notificationIds: [] };
+      const previous = items.find((r) => r.id === next.id);
+      const scheduleRevision = next.enabled && !previous?.enabled ? (previous?.scheduleRevision ?? 0) + 1 : next.scheduleRevision ?? previous?.scheduleRevision ?? 0;
+      const scheduled = { ...next, scheduleRevision, familyProfileId: next.familyProfileId ?? 'everyone', notificationIds: [] };
       if (scheduled.enabled && !items.some((r) => r.id === scheduled.id && r.enabled)) void recordRoutineEvent({ routineId: scheduled.id, routineName: scheduled.name, type: 'scheduled' });
       const newItems = items.some((r) => r.id === scheduled.id) ? items.map((r) => r.id === scheduled.id ? scheduled : r) : [...items, scheduled];
       setItems(newItems); await saveRoutines(newItems);
@@ -118,6 +127,36 @@ export function HomeScreen() {
       }
       setEditing(null);
     } catch (error) { Alert.alert('Could not schedule', error instanceof Error ? error.message : 'Please check notification settings.'); }
+  }
+  async function markRoutineDone(routine: Routine, occurrenceId: string) {
+    if (completing.current.has(occurrenceId)) return;
+    completing.current.add(occurrenceId);
+    try {
+      const eventProfileId = (routine.familyProfileId ?? 'everyone') === 'everyone' && profileFilter !== 'everyone' ? profileFilter : routine.familyProfileId ?? 'everyone';
+      const event = await recordRoutineEvent({ routineId: routine.id, routineName: routine.name, type: 'completed', profileId: eventProfileId, occurrenceId, routineType: routine.type, routineCategory: routine.reminderCategory ?? (routine.type === 'sleep' ? 'Bedtime' : 'Custom'), routineTime: routine.time });
+      if (!event) return;
+      const all = await loadAllRoutineHistory();
+      setCompletionEvents(all.filter((item) => item.type === 'completed' && (item.routineType === 'reminder' || item.routineType === 'sleep')));
+      const newUnlocks = await unlockEligibleAchievements(event, all);
+      const profile = familyProfiles.find((item) => item.id === event.profileId);
+      if (profile?.motivationalFeedback !== false) {
+        const language = profile?.motivationLanguage ?? 'en';
+        const messages = motivationMessages[language];
+        const message = messages[event.at % messages.length] ?? messages[0];
+        const unlocked = newUnlocks.map((item) => achievementCatalog.find((achievement) => achievement.id === item.achievementId)?.name).filter(Boolean);
+        setCelebration(unlocked.length ? `${message} Milestone unlocked: ${unlocked.join(', ')}!` : message);
+        setTimeout(() => setCelebration(''), 4_000);
+      }
+    } finally { completing.current.delete(occurrenceId); }
+  }
+  async function undoRoutineDone(event: RoutineEvent) {
+    const removed = await undoRoutineCompletion(event.id);
+    if (!removed) return;
+    const remaining = await loadAllRoutineHistory();
+    await undoCompletionUnlocks(event.id, remaining);
+    setCompletionEvents(remaining.filter((item) => item.type === 'completed' && (item.routineType === 'reminder' || item.routineType === 'sleep')));
+    setHistory(await loadRoutineHistory());
+    setCelebration('Completion undone.');
   }
   async function toggle(routine: Routine) { await replaceRoutine({ ...routine, enabled: !routine.enabled }); }
   async function remove(routine: Routine) {
@@ -150,10 +189,12 @@ export function HomeScreen() {
         <View style={styles.next}><Text style={styles.nextLabel}>Next scheduled</Text>{upcoming ? <><Text style={styles.nextTime}>{nextOccurrence(upcoming).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text><Text style={styles.nextName}>{upcoming.name} · {typeNames[upcoming.type]}</Text></> : <Text style={[styles.nextName, { marginTop: 8 }]}>No active routines yet</Text>}</View>
         <View style={styles.row}><Text style={[styles.listTitle, { color: colors.text }]}>Today</Text><Pressable onPress={() => { void loadRoutineHistory().then(setHistory); setHistoryOpen(true); }}><Text style={styles.action}>Recent activity</Text></Pressable></View>
         <View style={styles.chips}>{familyProfiles.map((p) => <Pressable key={p.id} style={[styles.chip, profileFilter === p.id && styles.chipOn]} onPress={() => setProfileFilter(p.id)}><Text style={[styles.chipText, profileFilter === p.id && styles.chipTextOn]}>{p.name}</Text></Pressable>)}<Pressable style={styles.chip} onPress={() => { setProfileDrafts(familyProfiles.map((p) => ({ ...p }))); setProfilesOpen(true); }}><Text style={styles.chipText}>Manage</Text></Pressable></View>
+        <View style={[styles.next, { padding: 13, marginBottom: 14 }]}><Text style={styles.nextLabel}>{familyProfiles.find((p) => p.id === profileFilter)?.name ?? 'Profile'} progress</Text><Text style={styles.nextName}>{profileProgress.today} completed today · {profileProgress.week} this week</Text></View>
+        {celebration ? <View style={styles.preview}><Text style={styles.previewText}>{celebration}</Text></View> : null}
         {todayItems.map((r) => <Pressable key={r.id} onPress={() => { setEditing({ ...r }); setAdvanced(false); }} style={[styles.card, dark && { backgroundColor: '#202D27', borderColor: '#34463D' }]}>
           <View style={styles.cardTop}><Text style={[styles.time, dark && { color: '#D2E5D9' }]}>{r.time}</Text><View style={{ flex: 1 }}><Text style={[styles.cardName, dark && { color: '#E4EEE8' }]}>{r.name}</Text><Text style={styles.meta}>{r.type !== 'alarm' ? `${r.reminderCategory ?? 'Custom'} · ` : ''}{typeNames[r.type]} · {r.repeat === 'weekdays' ? 'Weekdays' : r.repeat === 'daily' ? 'Daily' : r.repeat === 'custom' ? 'Custom days' : 'Once'}</Text></View><Switch value={r.enabled} onValueChange={() => void toggle(r)} trackColor={{ true: '#72A18A' }} /></View>
           <View style={[styles.badge, dark && { backgroundColor: '#2C3B34' }]}><Text style={[styles.badgeText, dark && { color: '#B9D0C3' }]}>{soundLabels[r.sound]} · {voiceLibrary?.profiles.find((p) => p.id === r.voiceProfileId)?.name ?? 'Default voice'} · {familyProfiles.find((p) => p.id === (r.familyProfileId ?? 'everyone'))?.name ?? 'Everyone'}</Text></View>
-          <View style={[styles.row, { marginTop: 10 }]}><Pressable onPress={() => void preview(r)}><Text style={styles.action}>Preview</Text></Pressable><Text style={styles.meta}>{r.enabled ? 'Enabled' : 'Disabled'}</Text><Pressable onPress={() => void recordRoutineEvent({ routineId: r.id, routineName: r.name, type: 'skipped' })}><Text style={styles.action}>Skip today</Text></Pressable></View>
+          <View style={[styles.row, { marginTop: 10 }]}><Pressable onPress={() => void preview(r)}><Text style={styles.action}>Preview</Text></Pressable><Text style={styles.meta}>{r.enabled ? 'Enabled' : 'Disabled'}</Text>{r.enabled && r.type !== 'alarm' && <Pressable onPress={(event) => { event.stopPropagation(); const occurrenceId = occurrenceIdForToday(r); if (!occurrenceId) return; const done = completionForOccurrence(completionEvents, occurrenceId); if (done) void undoRoutineDone(done); else void markRoutineDone(r, occurrenceId); }}><Text style={styles.action}>{completionForOccurrence(completionEvents, occurrenceIdForToday(r)) ? 'Undo' : occurrenceIdForToday(r) ? 'Mark as Done' : ''}</Text></Pressable>}<Pressable onPress={() => void recordRoutineEvent({ routineId: r.id, routineName: r.name, type: 'skipped' })}><Text style={styles.action}>Skip today</Text></Pressable></View>
         </Pressable>)}
         {!todayItems.length && <Text style={styles.subtitle}>No upcoming enabled routines for this filter.</Text>}
         <Pressable style={styles.add} onPress={() => setTemplatePicker(true)}><Text style={styles.addText}>＋  Add routine</Text></Pressable>
@@ -162,13 +203,13 @@ export function HomeScreen() {
       {playStatus ? <Pressable onPress={() => { stopPlayback?.(); setStopPlayback(null); setPlayStatus(''); }} style={styles.preview}><Text style={styles.previewText}>{playStatus} · Tap to stop</Text></Pressable> : null}
     </View>
     <Modal visible={templatePicker} animationType="slide" onRequestClose={() => setTemplatePicker(false)}><SafeAreaView style={styles.modal}><View style={styles.modalHead}><Pressable onPress={() => setTemplatePicker(false)}><Text style={styles.action}>Cancel</Text></Pressable><Text style={styles.modalTitle}>Choose a template</Text><View style={{ width: 48 }} /></View><ScrollView contentContainerStyle={{ padding: 20 }}>{routineTemplates.map((template) => <Pressable key={template.id} style={styles.card} onPress={() => { void loadDefaults().then(async (defaults) => { const library = await loadVoiceLibrary(); setVoiceLibrary(library); setEditing({ ...blank, ...defaults, id: `new-${Date.now()}`, name: template.name, type: template.type, time: template.time, sound: template.sound, message: template.message, messageVariants: [{ id: 'message-default', text: template.message }], reminderBehavior: template.reminderBehavior, tone: template.tone, voiceProfileId: library.defaultProfileId, familyProfileId: 'everyone' }); setAdvanced(false); setTemplatePicker(false); }); }}><Text style={styles.cardName}>{template.name}</Text><Text style={styles.meta}>{template.time} · {typeNames[template.type]} · {soundLabels[template.sound]}</Text></Pressable>)}<Pressable style={styles.add} onPress={() => { setTemplatePicker(false); void loadDefaults().then(async (defaults) => { const library = await loadVoiceLibrary(); setVoiceLibrary(library); setEditing({ ...blank, id: `new-${Date.now()}`, ...defaults, voiceProfileId: library.defaultProfileId, familyProfileId: 'everyone' }); setAdvanced(false); }); }}><Text style={styles.addText}>Start from blank</Text></Pressable></ScrollView></SafeAreaView></Modal>
-    <Modal visible={profilesOpen} animationType="slide" onRequestClose={() => setProfilesOpen(false)}><SafeAreaView style={styles.modal}><View style={styles.modalHead}><Pressable onPress={() => setProfilesOpen(false)}><Text style={styles.action}>Cancel</Text></Pressable><Text style={styles.modalTitle}>Family profiles</Text><Pressable onPress={() => { const cleaned = profileDrafts.filter((p) => p.name.trim()); const allowed = new Set(cleaned.map((p) => p.id)); const updated = items.map((r) => allowed.has(r.familyProfileId ?? 'everyone') ? r : { ...r, familyProfileId: 'everyone' }); setFamilyProfiles(cleaned); setItems(updated); void saveProfiles(cleaned); void saveRoutines(updated); if (!allowed.has(profileFilter)) setProfileFilter('everyone'); setProfilesOpen(false); }}><Text style={styles.action}>Save</Text></Pressable></View><ScrollView contentContainerStyle={{ padding: 20 }}>{profileDrafts.map((p) => <View key={p.id} style={styles.row}><TextInput value={p.name} editable={p.id !== 'everyone'} onChangeText={(name) => setProfileDrafts(profileDrafts.map((item) => item.id === p.id ? { ...item, name } : item))} style={[styles.input, { flex: 1 }]} /><Pressable disabled={p.id === 'everyone'} onPress={() => setProfileDrafts(profileDrafts.filter((item) => item.id !== p.id))}><Text style={[styles.action, p.id === 'everyone' && { color: '#AAA' }]}>Delete</Text></Pressable></View>)}<Pressable style={styles.add} onPress={() => setProfileDrafts([...profileDrafts, { id: `family-${Date.now()}`, name: '' }])}><Text style={styles.addText}>＋  Add profile</Text></Pressable><Text style={styles.meta}>Everyone is the shared label. Deleting a profile moves its routines to Everyone.</Text></ScrollView></SafeAreaView></Modal>
-    <Modal visible={historyOpen} animationType="slide" onRequestClose={() => setHistoryOpen(false)}><SafeAreaView style={styles.modal}><View style={styles.modalHead}><Pressable onPress={() => setHistoryOpen(false)}><Text style={styles.action}>Done</Text></Pressable><Text style={styles.modalTitle}>Recent activity</Text><View style={{ width: 42 }} /></View><ScrollView contentContainerStyle={{ padding: 20 }}>{history.map((event) => <View key={event.id} style={styles.card}><Text style={styles.cardName}>{event.routineName}</Text><Text style={styles.meta}>{event.type} · {new Date(event.at).toLocaleString()}</Text></View>)}{!history.length && <Text style={styles.subtitle}>Routine events from the last 30 days will appear here.</Text>}</ScrollView></SafeAreaView></Modal>
+    <Modal visible={profilesOpen} animationType="slide" onRequestClose={() => setProfilesOpen(false)}><SafeAreaView style={styles.modal}><View style={styles.modalHead}><Pressable onPress={() => setProfilesOpen(false)}><Text style={styles.action}>Cancel</Text></Pressable><Text style={styles.modalTitle}>Family profiles</Text><Pressable onPress={() => { const removedIds = familyProfiles.filter((p) => p.id !== 'everyone' && !profileDrafts.some((draft) => draft.id === p.id)).map((p) => p.id); for (const id of removedIds) void removeDeletedProfileUnlocks(id); const cleaned = profileDrafts.filter((p) => p.name.trim()); const allowed = new Set(cleaned.map((p) => p.id)); const updated = items.map((r) => allowed.has(r.familyProfileId ?? 'everyone') ? r : { ...r, familyProfileId: 'everyone' }); setFamilyProfiles(cleaned); setItems(updated); void saveProfiles(cleaned); void saveRoutines(updated); if (!allowed.has(profileFilter)) setProfileFilter('everyone'); setProfilesOpen(false); }}><Text style={styles.action}>Save</Text></Pressable></View><ScrollView contentContainerStyle={{ padding: 20 }}>{profileDrafts.map((p) => <View key={p.id} style={styles.row}><TextInput value={p.name} editable={p.id !== 'everyone'} onChangeText={(name) => setProfileDrafts(profileDrafts.map((item) => item.id === p.id ? { ...item, name } : item))} style={[styles.input, { flex: 1 }]} /><Pressable disabled={p.id === 'everyone'} onPress={() => setProfileDrafts(profileDrafts.filter((item) => item.id !== p.id))}><Text style={[styles.action, p.id === 'everyone' && { color: '#AAA' }]}>Delete</Text></Pressable></View>)}{profileDrafts.map((p) => <View key={`${p.id}-motivation`} style={{ paddingHorizontal: 4, marginBottom: 12 }}><View style={styles.row}><Text style={styles.lineLabel}>Motivation for {p.name || 'new profile'}</Text><Switch value={p.motivationalFeedback !== false} onValueChange={(value) => setProfileDrafts(profileDrafts.map((item) => item.id === p.id ? { ...item, motivationalFeedback: value } : item))} /></View><View style={styles.chips}>{(['en', 'pl'] as const).map((language) => <Pressable key={language} style={[styles.chip, (p.motivationLanguage ?? 'en') === language && styles.chipOn]} onPress={() => setProfileDrafts(profileDrafts.map((item) => item.id === p.id ? { ...item, motivationLanguage: language } : item))}><Text style={[styles.chipText, (p.motivationLanguage ?? 'en') === language && styles.chipTextOn]}>{language === 'en' ? 'English' : 'Polski'}</Text></Pressable>)}</View></View>)}<Pressable style={styles.add} onPress={() => setProfileDrafts([...profileDrafts, { id: `family-${Date.now()}`, name: '' }])}><Text style={styles.addText}>＋  Add profile</Text></Pressable><Text style={styles.meta}>Everyone is the shared label. Deleting a profile moves its routines to Everyone.</Text></ScrollView></SafeAreaView></Modal>
+    <Modal visible={historyOpen} animationType="slide" onRequestClose={() => setHistoryOpen(false)}><SafeAreaView style={styles.modal}><View style={styles.modalHead}><Pressable onPress={() => setHistoryOpen(false)}><Text style={styles.action}>Done</Text></Pressable><Text style={styles.modalTitle}>Recent activity</Text><View style={{ width: 42 }} /></View><ScrollView contentContainerStyle={{ padding: 20 }}>{history.map((event) => <View key={event.id} style={styles.card}><Text style={styles.cardName}>{event.routineName}</Text><View style={styles.row}><Text style={styles.meta}>{event.type} · {new Date(event.at).toLocaleString()}</Text>{event.type === 'completed' && (event.routineType === 'reminder' || event.routineType === 'sleep') && <Pressable onPress={() => void undoRoutineDone(event)}><Text style={styles.action}>Undo</Text></Pressable>}</View></View>)}{!history.length && <Text style={styles.subtitle}>Routine events from the last 30 days will appear here.</Text>}</ScrollView></SafeAreaView></Modal>
     <Modal visible={editing !== null} animationType="slide" onRequestClose={() => setEditing(null)}>
       {editing && <RoutineEditor routine={editing} profiles={voiceLibrary?.profiles ?? []} familyProfiles={familyProfiles} defaultProfileId={voiceLibrary?.defaultProfileId} advanced={advanced} setAdvanced={setAdvanced} onChange={setEditing} onClose={() => setEditing(null)} onPreview={() => void preview(editing)} onSave={() => void replaceRoutine(editing)} onDelete={() => remove(editing)} />}
     </Modal>
     <Modal visible={activeAlarm !== null} animationType="fade" onRequestClose={() => void dismissAlarm()}>
-      {activeAlarm && <SafeAreaView style={styles.active}><Text style={styles.activeTime}>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text><Text style={styles.activeName}>{activeAlarm.name}</Text><Text style={styles.activeDetail}>{soundLabels[activeAlarm.sound]} is playing{playStatus ? ` · ${playStatus.toLowerCase()}` : ''}</Text><Pressable style={styles.dismiss} onPress={() => { void recordRoutineEvent({ routineId: activeAlarm.id, routineName: activeAlarm.name, type: 'completed' }); void dismissAlarm(false); }}><Text style={styles.dismissText}>Mark complete</Text></Pressable><Pressable style={styles.snooze} onPress={() => void snoozeAlarm()}><Text style={styles.snoozeText}>Snooze · {activeAlarm.snoozeMinutes} min</Text></Pressable></SafeAreaView>}
+      {activeAlarm && <SafeAreaView style={styles.active}><Text style={styles.activeTime}>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text><Text style={styles.activeName}>{activeAlarm.name}</Text><Text style={styles.activeDetail}>{soundLabels[activeAlarm.sound]} is playing{playStatus ? ` · ${playStatus.toLowerCase()}` : ''}</Text><Pressable style={styles.dismiss} onPress={() => void dismissAlarm()}><Text style={styles.dismissText}>Dismiss</Text></Pressable><Pressable style={styles.snooze} onPress={() => void snoozeAlarm()}><Text style={styles.snoozeText}>Snooze · {activeAlarm.snoozeMinutes} min</Text></Pressable></SafeAreaView>}
     </Modal>
   </SafeAreaView>;
 }

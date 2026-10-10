@@ -14,7 +14,7 @@ export type Routine = {
   reminderBehavior?: ReminderBehavior;
   reminderCategory?: ReminderCategory;
   voiceProfileId?: string; ttsOverrides?: Partial<TtsVoiceSettings>; messageVariants?: TextVariant[]; previewAudioUri?: string;
-  familyProfileId?: string; sleepTimerMinutes?: number;
+  familyProfileId?: string; sleepTimerMinutes?: number; scheduleRevision?: number;
 };
 
 const STORAGE_KEY = 'alarm-companion.routines.v1';
