@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { loadVoiceLibrary, migrateRoutineVoices, saveVoiceLibrary, type TextVariant, type TtsVoiceSettings } from './voices';
 
 export type RoutineType = 'alarm' | 'reminder' | 'sleep';
 export type ReminderBehavior = 'notification-only' | 'sound' | 'spoken';
@@ -7,20 +8,33 @@ export type SoundId = 'none' | 'birds' | 'rain' | 'ocean' | 'stream' | 'chime';
 export type Tone = 'Gentle' | 'Cheerful' | 'Firm' | 'Playful';
 export type Routine = {
   id: string; name: string; type: RoutineType; time: string; repeat: 'once' | 'weekdays' | 'daily' | 'custom';
-  days: number[]; enabled: boolean; message: string; language: 'en-US' | 'pl-PL'; voice?: string; tone: Tone;
-  speed: number; pitch: number; sound: SoundId; introSeconds: number; fadeSeconds: number;
+  days: number[]; enabled: boolean; message?: string; language?: 'en-US' | 'pl-PL'; voice?: string; tone?: Tone;
+  speed?: number; pitch?: number; sound: SoundId; introSeconds: number; fadeSeconds: number;
   backgroundVolume: number; voiceVolume: number; repeatVoice: boolean; snoozeMinutes: number; notificationIds: string[];
   reminderBehavior?: ReminderBehavior;
   reminderCategory?: ReminderCategory;
+  voiceProfileId?: string; ttsOverrides?: Partial<TtsVoiceSettings>; messageVariants?: TextVariant[]; previewAudioUri?: string;
 };
 
 const STORAGE_KEY = 'alarm-companion.routines.v1';
 const DEFAULTS_KEY = 'alarm-companion.defaults.v1';
-export type RoutineDefaults = { language: 'en-US' | 'pl-PL'; voice?: string; tone: Tone; sound: SoundId; fadeSeconds: number };
-export const initialDefaults: RoutineDefaults = { language: 'en-US', tone: 'Gentle', sound: 'birds', fadeSeconds: 30 };
+export type RoutineDefaults = { sound: SoundId; fadeSeconds: number };
+export const initialDefaults: RoutineDefaults = { sound: 'birds', fadeSeconds: 30 };
 export async function loadDefaults(): Promise<RoutineDefaults> {
   const value = await AsyncStorage.getItem(DEFAULTS_KEY);
-  if (value) { try { return { ...initialDefaults, ...JSON.parse(value) as Partial<RoutineDefaults> }; } catch { await AsyncStorage.removeItem(DEFAULTS_KEY); } }
+  if (value) {
+    try {
+      const parsed = JSON.parse(value) as Record<string, unknown>;
+      if (typeof parsed.language === 'string' || typeof parsed.voice === 'string' || typeof parsed.tone === 'string') {
+        const library = await loadVoiceLibrary();
+        const profiles = library.profiles.map((profile) => profile.id === library.defaultProfileId && profile.kind === 'tts' ? {
+          ...profile, tts: { language: String(parsed.language ?? profile.tts?.language ?? 'en-US'), ...(typeof parsed.voice === 'string' ? { voice: parsed.voice } : {}), tone: (parsed.tone as Tone) ?? profile.tts?.tone ?? 'Gentle' }
+        } : profile);
+        await saveVoiceLibrary({ ...library, profiles });
+      }
+      return { sound: (parsed.sound as SoundId) ?? initialDefaults.sound, fadeSeconds: typeof parsed.fadeSeconds === 'number' ? parsed.fadeSeconds : initialDefaults.fadeSeconds };
+    } catch { await AsyncStorage.removeItem(DEFAULTS_KEY); }
+  }
   return initialDefaults;
 }
 export async function saveDefaults(defaults: RoutineDefaults): Promise<void> { await AsyncStorage.setItem(DEFAULTS_KEY, JSON.stringify(defaults)); }
@@ -34,9 +48,11 @@ function make(overrides: Partial<Routine>): Routine {
 }
 export async function loadRoutines(): Promise<Routine[]> {
   const value = await AsyncStorage.getItem(STORAGE_KEY);
-  if (value) { try { return JSON.parse(value) as Routine[]; } catch { await AsyncStorage.removeItem(STORAGE_KEY); } }
-  await saveRoutines(demoRoutines);
-  return demoRoutines;
+  let routines = demoRoutines;
+  if (value) { try { routines = JSON.parse(value) as Routine[]; } catch { await AsyncStorage.removeItem(STORAGE_KEY); } }
+  const migrated = await migrateRoutineVoices(routines);
+  await saveRoutines(migrated);
+  return migrated;
 }
 export async function saveRoutines(routines: Routine[]): Promise<void> { await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(routines)); }
 export const soundLabels: Record<SoundId, string> = { none: 'None', birds: 'Birds', rain: 'Rain', ocean: 'Ocean', stream: 'Forest stream', chime: 'Soft chime' };

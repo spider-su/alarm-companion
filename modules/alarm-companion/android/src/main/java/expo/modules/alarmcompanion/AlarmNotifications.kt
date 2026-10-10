@@ -24,7 +24,7 @@ object AlarmNotifications {
     val id = routine.optString("id")
     val activity = PendingIntent.getActivity(context, id.hashCode(), Intent(context, AlarmActivity::class.java).putExtra("id", id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     val builder = notificationBuilder(context, if (alarm) ALARM_CHANNEL else PLAYBACK_CHANNEL)
-      .setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle(routine.optString("name")).setContentText(if (alarm) "Alarm is ringing" else "Reminder is playing")
+      .setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle(routine.optString("name")).setContentText(if (routine.optBoolean("recordingUnavailable")) "Voice recording is unavailable" else if (alarm) "Alarm is ringing" else "Reminder is playing")
       .setCategory(if (alarm) Notification.CATEGORY_ALARM else Notification.CATEGORY_REMINDER).setOngoing(alarm).setContentIntent(activity).setVisibility(Notification.VISIBILITY_PUBLIC)
     if (alarm) {
       builder.addAction(android.R.drawable.ic_media_pause, "Snooze", action(context, id, true))
@@ -36,7 +36,9 @@ object AlarmNotifications {
   fun postReminder(context: Context, routine: JSONObject) {
     ensureChannels(context)
     val open = PendingIntent.getActivity(context, routine.optString("id").hashCode(), Intent(context, AlarmActivity::class.java).putExtra("id", routine.optString("id")), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-    val notification = notificationBuilder(context, ALARM_CHANNEL).setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle(routine.optString("name")).setContentText(routine.optString("message")).setContentIntent(open).setAutoCancel(true).build()
+    val variants = routine.optJSONArray("messageVariants")
+    val text = variants?.optJSONObject(if (variants.length() > 0) (Math.random() * variants.length()).toInt() else 0)?.optString("text")?.takeIf { it.isNotBlank() } ?: routine.optString("message", "Your reminder is due.")
+    val notification = notificationBuilder(context, ALARM_CHANNEL).setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle(routine.optString("name")).setContentText(text).setContentIntent(open).setAutoCancel(true).build()
     context.getSystemService(NotificationManager::class.java).notify(routine.optString("id").hashCode(), notification)
   }
   fun postAlarmFallback(context: Context, routine: JSONObject) {
@@ -48,6 +50,15 @@ object AlarmNotifications {
     builder.addAction(android.R.drawable.ic_media_pause, "Snooze", action(context, id, true))
     builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dismiss", action(context, id, false))
     if (Build.VERSION.SDK_INT < 34 || context.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()) builder.setFullScreenIntent(activity, true)
+    context.getSystemService(NotificationManager::class.java).notify(id.hashCode(), builder.build())
+  }
+  fun postAlarmWaiting(context: Context, routine: JSONObject) {
+    ensureChannels(context)
+    val id = routine.optString("id")
+    val activity = PendingIntent.getActivity(context, id.hashCode(), Intent(context, AlarmActivity::class.java).putExtra("id", id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    val builder = notificationBuilder(context, ALARM_CHANNEL).setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle(routine.optString("name", "Alarm")).setContentText("Another alarm is active. Tap here after dismissing it to start this alarm.").setCategory(Notification.CATEGORY_ALARM).setOngoing(true).setContentIntent(activity).setVisibility(Notification.VISIBILITY_PUBLIC)
+    builder.addAction(android.R.drawable.ic_media_pause, "Snooze", action(context, id, true))
+    builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dismiss", action(context, id, false))
     context.getSystemService(NotificationManager::class.java).notify(id.hashCode(), builder.build())
   }
   fun cancel(context: Context, id: String) = context.getSystemService(NotificationManager::class.java).cancel(id.hashCode())
