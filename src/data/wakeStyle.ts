@@ -1,6 +1,6 @@
-import type { Routine, Tone } from './routines';
+import type { Routine, Tone, WakeStylePreset } from './routines';
 
-export type WakeStyle = 'Gentle' | 'Balanced' | 'Energetic' | 'Custom';
+export type WakeStyle = WakeStylePreset | 'Custom';
 
 type WakeSettings = Pick<Routine, 'sound' | 'introSeconds' | 'fadeSeconds' | 'backgroundVolume' | 'voiceVolume'> & { tone: Tone };
 
@@ -22,6 +22,8 @@ export function wakeStyleFor(routine: Routine, profileTone?: Tone): WakeStyle {
       && routine.fadeSeconds === expected.fadeSeconds
       && routine.backgroundVolume === expected.backgroundVolume
       && routine.voiceVolume === expected.voiceVolume
+      && routine.ttsOverrides?.speedOverride === undefined
+      && routine.ttsOverrides?.pitchOverride === undefined
       && toneFor(routine, profileTone) === expected.tone;
   });
   return matches ?? 'Custom';

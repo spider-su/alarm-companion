@@ -6,6 +6,8 @@ export type ReminderBehavior = 'notification-only' | 'sound' | 'spoken';
 export type ReminderCategory = 'School' | 'Work' | 'Break' | 'Exercise' | 'Bedtime' | 'Custom';
 export type SoundId = 'none' | 'birds' | 'rain' | 'ocean' | 'stream' | 'chime';
 export type Tone = 'Gentle' | 'Cheerful' | 'Firm' | 'Playful';
+export type WakeStylePreset = 'Gentle' | 'Balanced' | 'Energetic';
+export type WakeStylePreference = WakeStylePreset | 'Custom';
 export type Routine = {
   id: string; name: string; type: RoutineType; time: string; repeat: 'once' | 'weekdays' | 'daily' | 'custom';
   days: number[]; enabled: boolean; message?: string; language?: 'en-US' | 'pl-PL'; voice?: string; tone?: Tone;
@@ -19,8 +21,8 @@ export type Routine = {
 
 const STORAGE_KEY = 'alarm-companion.routines.v1';
 const DEFAULTS_KEY = 'alarm-companion.defaults.v1';
-export type RoutineDefaults = { sound: SoundId; fadeSeconds: number };
-export const initialDefaults: RoutineDefaults = { sound: 'birds', fadeSeconds: 30 };
+export type RoutineDefaults = { sound: SoundId; fadeSeconds: number; wakeStyle: WakeStylePreference };
+export const initialDefaults: RoutineDefaults = { sound: 'birds', fadeSeconds: 30, wakeStyle: 'Gentle' };
 export async function loadDefaults(): Promise<RoutineDefaults> {
   const value = await AsyncStorage.getItem(DEFAULTS_KEY);
   if (value) {
@@ -33,7 +35,11 @@ export async function loadDefaults(): Promise<RoutineDefaults> {
         } : profile);
         await saveVoiceLibrary({ ...library, profiles });
       }
-      return { sound: (parsed.sound as SoundId) ?? initialDefaults.sound, fadeSeconds: typeof parsed.fadeSeconds === 'number' ? parsed.fadeSeconds : initialDefaults.fadeSeconds };
+      const sound = (parsed.sound as SoundId) ?? initialDefaults.sound;
+      const fadeSeconds = typeof parsed.fadeSeconds === 'number' ? parsed.fadeSeconds : initialDefaults.fadeSeconds;
+      const savedStyle = ['Gentle', 'Balanced', 'Energetic', 'Custom'].includes(String(parsed.wakeStyle)) ? parsed.wakeStyle as WakeStylePreference : undefined;
+      const wakeStyle = savedStyle ?? (sound === 'birds' && fadeSeconds === 30 ? initialDefaults.wakeStyle : 'Custom');
+      return { sound, fadeSeconds, wakeStyle };
     } catch { await AsyncStorage.removeItem(DEFAULTS_KEY); }
   }
   return initialDefaults;
