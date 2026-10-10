@@ -1,0 +1,11 @@
+# Project-local Codex settings for Alarm Companion.
+project_doc_max_bytes = 32768
+
+# Keep repository workflows inside this checkout while allowing package and
+# Gradle dependencies to resolve during local Android builds.
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+web_search = "cached"
+
+[sandbox_workspace_write]
+network_access = true
