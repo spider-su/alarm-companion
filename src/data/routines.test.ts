@@ -28,13 +28,14 @@ describe('local routine defaults and persistence', () => {
     edited[0]!.messageVariants = [{ id: 'first', text: 'Wake up!' }];
     await saveRoutines(edited);
     const loaded = await loadRoutines();
-    expect(loaded[0]).toMatchObject({ enabled: true, messageVariants: [{ id: 'first', text: 'Wake up!' }], voiceProfileId: DEFAULT_PROFILE_ID });
+    expect(loaded[0]).toMatchObject({ enabled: true, familyProfileId: 'everyone', messageVariants: [{ id: 'first', text: 'Wake up!' }], voiceProfileId: DEFAULT_PROFILE_ID });
     expect(loaded).toHaveLength(edited.length);
   });
   it('migrates M1 voice fields to shared profiles and message variants', async () => {
     const old = [{ ...demoRoutines[0]!, id: 'old-one', language: 'pl-PL' as const, voice: 'pl-voice', speed: 1.2, pitch: 1.1 }, { ...demoRoutines[0]!, id: 'old-two', language: 'pl-PL' as const, voice: 'pl-voice', speed: 1.2, pitch: 1.1 }];
     await saveRoutines(old);
     const migrated = await loadRoutines();
+    expect(migrated[0]?.familyProfileId).toBe('everyone');
     expect(migrated[0]?.voiceProfileId).toEqual(migrated[1]?.voiceProfileId);
     expect(migrated[0]?.messageVariants?.[0]?.text).toBe(old[0]?.message);
     expect(migrated[0]?.language).toBeUndefined();

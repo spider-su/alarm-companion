@@ -16,6 +16,7 @@ object NativeAlarmScheduler {
   private const val PREFS = "alarm_companion_native_v1"
   private const val ROUTINES = "routines"
   private const val COMPLETED = "completed"
+  private const val ROUTINE_EVENTS = "routineEvents"
   data class Routine(val id: String, val name: String, val type: String, val time: String, val repeat: String, val days: Set<Int>, val enabled: Boolean, val reminderBehavior: String, val source: JSONObject)
 
   fun sync(context: Context, json: String): Map<String, Any> {
@@ -68,6 +69,7 @@ object NativeAlarmScheduler {
       } else schedule(context, context.getSystemService(AlarmManager::class.java), routine, null, "regular")
       prefs.edit().putString(ROUTINES, routines.toString()).apply()
     } else prefs.edit().remove("snoozeAt:$id").apply()
+    recordEvent(context, routine, "triggered")
     val type = routine.optString("type")
     val behavior = routine.optString("reminderBehavior", "notification-only")
     if (type == "alarm" && !capabilities(context)["exactAlarms"].toString().toBoolean()) { AlarmNotifications.postAlarmFallback(context, routine); return }
@@ -95,6 +97,7 @@ object NativeAlarmScheduler {
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     val routines = runCatching { JSONObject(prefs.getString(ROUTINES, "{}") ?: "{}") }.getOrDefault(JSONObject())
     val routine = routines.optJSONObject(id) ?: return
+    recordEvent(context, routine, "snoozed")
     val manager = context.getSystemService(AlarmManager::class.java)
     cancel(context, manager, id, "snooze")
     schedule(context, manager, routine, System.currentTimeMillis() + routine.optInt("snoozeMinutes", 9) * 60_000L, "snooze")
@@ -103,9 +106,31 @@ object NativeAlarmScheduler {
 
   fun dismiss(context: Context?, id: String) {
     if (context == null) return
+    val routines = runCatching { JSONObject(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(ROUTINES, "{}") ?: "{}") }.getOrDefault(JSONObject())
+    routines.optJSONObject(id)?.let { recordEvent(context, it, "dismissed") }
     cancel(context, context.getSystemService(AlarmManager::class.java), id, "snooze")
     AlarmNotifications.cancel(context, id)
     AlarmPlaybackService.stop(context, id)
+  }
+
+  fun consumeRoutineEvents(context: Context?): List<Map<String, Any>> {
+    if (context == null) return emptyList()
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val events = runCatching { JSONArray(prefs.getString(ROUTINE_EVENTS, "[]") ?: "[]") }.getOrDefault(JSONArray())
+    val result = (0 until events.length()).mapNotNull { index ->
+      events.optJSONObject(index)?.let { event -> mapOf("routineId" to event.optString("routineId"), "routineName" to event.optString("routineName"), "type" to event.optString("type"), "at" to event.optLong("at")) }
+    }
+    prefs.edit().remove(ROUTINE_EVENTS).apply()
+    return result
+  }
+
+  private fun recordEvent(context: Context, routine: JSONObject, type: String) {
+    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val events = runCatching { JSONArray(prefs.getString(ROUTINE_EVENTS, "[]") ?: "[]") }.getOrDefault(JSONArray())
+    events.put(JSONObject().put("routineId", routine.optString("id")).put("routineName", routine.optString("name")).put("type", type).put("at", System.currentTimeMillis()))
+    val start = maxOf(0, events.length() - 500)
+    val bounded = JSONArray((start until events.length()).mapNotNull(events::optJSONObject))
+    prefs.edit().putString(ROUTINE_EVENTS, bounded.toString()).apply()
   }
 
   fun consumeCompleted(context: Context?): List<String> {

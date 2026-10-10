@@ -24,6 +24,7 @@ class AlarmCompanionModule : Module() {
     AsyncFunction("dismissAlarm") { id: String -> NativeAlarmScheduler.dismiss(appContext.reactContext, id) }
     AsyncFunction("snoozeAlarm") { id: String -> NativeAlarmScheduler.snooze(appContext.reactContext, id) }
     AsyncFunction("consumeCompletedRoutineIds") { NativeAlarmScheduler.consumeCompleted(appContext.reactContext) }
+    AsyncFunction("consumeRoutineEvents") { NativeAlarmScheduler.consumeRoutineEvents(appContext.reactContext) }
   }
 
   private fun openSettings(action: String) {

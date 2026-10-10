@@ -14,6 +14,7 @@ type NativeAlarmCompanion = {
   dismissAlarm(id: string): Promise<void>;
   snoozeAlarm(id: string): Promise<void>;
   consumeCompletedRoutineIds(): Promise<string[]>;
+  consumeRoutineEvents(): Promise<Array<{ routineId: string; routineName: string; type: string; at: number }>>;
 };
 
 function module(): NativeAlarmCompanion | undefined {
@@ -36,3 +37,4 @@ export async function stopNativePlayback() { return module()?.stopPlayback(); }
 export async function dismissNativeAlarm(id: string) { return module()?.dismissAlarm(id); }
 export async function snoozeNativeAlarm(id: string) { return module()?.snoozeAlarm(id); }
 export async function consumeCompletedRoutineIds() { return (await module()?.consumeCompletedRoutineIds()) ?? []; }
+export async function consumeNativeRoutineEvents() { return (await module()?.consumeRoutineEvents()) ?? []; }

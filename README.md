@@ -46,6 +46,14 @@ Reminders offer **Notification only**, **Notification + sound**, and **Notificat
 
 The app does not request overlay or broad storage permissions. The system document picker grants access to an imported audio file, which is copied into app-private storage. Android controls DND, silent mode, lock-screen privacy, exact-alarm eligibility, and full-screen intent availability.
 
+## Routines and family organization
+
+Home shows routines in time order, including disabled entries, with their status, type, selected sound/voice and profile. Profile filters include shared **Everyone** routines. Profiles are local labels and can be managed on Home; routines saved before this feature are treated as shared. Add Routine opens the bundled templates or a blank editor. Templates prefill editable settings and remain disabled until explicitly enabled.
+
+Sleep routines include a 5, 15, 30, or 60 minute ambient sound timer. On Android, the existing playback foreground service gradually fades the ambient track over the final 30 seconds and releases it. The timer begins after any spoken message finishes (or when sound-only playback begins); system process termination and device-specific restrictions can still affect playback.
+
+Home's Recent activity keeps a local, 30-day event list. It records schedule enablement, Android alarm/reminder triggers and notification-action snooze/dismiss events, explicit completion, and Skip today. Native Android events queue in app-private preferences and are copied into local history when the app resumes. Dismissing is not treated as completion. History is not synced or backed up.
+
 ## Voice Library
 
 Open **Settings → Voice Library** to record/import clips, preview, rename or delete them, and create reusable TTS or recording profiles. A routine selects one profile; recorded profiles can contain several clips and select a clip at playback. TTS routines support editable message variants and select one for each playback. The default voice profile applies to new routines, while saved routines retain their chosen profile. Consent is requested in the UI before recording or importing a person's voice; obtain the speaker's permission first.
@@ -71,7 +79,7 @@ The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Verification and manual Android checklist
 
-Automated checks cover TypeScript, lint, profile/routine migration, tone resolution, message and recording selection, and JS schedule/snooze calculations. The Android debug APK build compiles the native module and manifest. These checks do not prove AlarmManager, notification, audio, or lock-screen behavior on a physical Android device.
+Automated checks cover TypeScript, lint, family template defaults and filtering, 30-day history selection, profile/routine migration, tone resolution, message and recording selection, and JS schedule/snooze calculations. The Android debug APK build compiles the native module and manifest. These checks do not prove AlarmManager, notification, audio, or lock-screen behavior on a physical Android device.
 
 - [ ] Alarm in 2 minutes with app open.
 - [ ] Alarm in 2 minutes with app backgrounded.
@@ -91,5 +99,9 @@ Automated checks cover TypeScript, lint, profile/routine migration, tone resolut
 - [ ] Import, preview, rename, assign, and delete recordings; confirm routine behavior when a file is unavailable.
 - [ ] Add multiple text variants and recording clips; confirm selection changes across playback.
 - [ ] Offline operation.
+- [ ] Create a routine from each template and verify it stays disabled until enabled.
+- [ ] Add/rename/delete local profiles and verify deleted routines move to Everyone.
+- [ ] Start a sleep routine with voice and without voice, then verify timer fade and stop in background.
+- [ ] Verify recent activity and its 30-day retention.
 
 No physical Android device or emulator was available during implementation; the build is ready for device validation, not verified for end-to-end reliability.

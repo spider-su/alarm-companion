@@ -8,7 +8,8 @@ import { loadDefaults, loadRoutines, saveRoutines, soundLabels, type Routine, ty
 import { loadVoiceLibrary, type VoiceLibrary, type VoiceProfile } from '../data/voices';
 import { nextOccurrence } from '../data/schedule';
 import { playSequence } from '../audio/sequence';
-import { consumeCompletedRoutineIds, dismissNativeAlarm, isNativeAlarmAndroid, openExactAlarmSettings, snoozeNativeAlarm, syncNativeRoutines } from '../native/alarmCompanion';
+import { EVERYONE, loadProfiles, loadRoutineHistory, recordRoutineEvent, routinesForProfile, routineTemplates, saveProfiles, type FamilyProfile, type RoutineEvent } from '../data/family';
+import { consumeCompletedRoutineIds, consumeNativeRoutineEvents, dismissNativeAlarm, isNativeAlarmAndroid, openExactAlarmSettings, snoozeNativeAlarm, syncNativeRoutines } from '../native/alarmCompanion';
 
 const blank: Routine = { id: '', name: '', type: 'alarm', time: '07:00', repeat: 'once', days: [], enabled: false, messageVariants: [{ id: 'message-default', text: 'Good morning! It is time to wake up.' }], sound: 'birds', introSeconds: 8, fadeSeconds: 30, backgroundVolume: 0.35, voiceVolume: 1, repeatVoice: false, snoozeMinutes: 9, notificationIds: [], reminderCategory: 'Custom', reminderBehavior: 'notification-only' };
 const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -19,6 +20,13 @@ export function HomeScreen() {
   const dark = useColorScheme() === 'dark';
   const colors = dark ? { bg: '#111A17', text: '#E4EEE8' } : { bg: '#F7F9F7', text: '#18352E' };
   const [items, setItems] = useState<Routine[]>([]);
+  const [familyProfiles, setFamilyProfiles] = useState<FamilyProfile[]>([EVERYONE]);
+  const [profileFilter, setProfileFilter] = useState('everyone');
+  const [templatePicker, setTemplatePicker] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [profilesOpen, setProfilesOpen] = useState(false);
+  const [profileDrafts, setProfileDrafts] = useState<FamilyProfile[]>([]);
+  const [history, setHistory] = useState<RoutineEvent[]>([]);
   const [voiceLibrary, setVoiceLibrary] = useState<VoiceLibrary | null>(null);
   const [editing, setEditing] = useState<Routine | null>(null);
   const [activeAlarm, setActiveAlarm] = useState<Routine | null>(null);
@@ -37,6 +45,8 @@ export function HomeScreen() {
         const reconciled = completed.length ? current.map((r) => completed.includes(r.id) ? { ...r, enabled: false, notificationIds: [] } : r) : current;
         if (completed.length) { itemsRef.current = reconciled; setItems(reconciled); await saveRoutines(reconciled); }
         await syncNativeRoutines(reconciled);
+        const events = await consumeNativeRoutineEvents();
+        for (const event of events) if (['triggered', 'dismissed', 'snoozed'].includes(event.type)) await recordRoutineEvent({ routineId: event.routineId, routineName: event.routineName, type: event.type as RoutineEvent['type'] }, event.at);
       })();
     });
     return () => subscription.remove();
@@ -47,6 +57,7 @@ export function HomeScreen() {
       const routine = itemsRef.current.find((item) => item.id === data.routineId && item.type === 'alarm');
       if (!routine || !mounted) return;
       setActiveAlarm(routine);
+      if (!isNativeAlarmAndroid) void recordRoutineEvent({ routineId: routine.id, routineName: routine.name, type: 'triggered' });
       void playSequence(routine, setPlayStatus).then((stop) => { if (mounted) setStopPlayback(() => stop); });
     };
     void loadRoutines().then(async (persisted) => {
@@ -57,8 +68,11 @@ export function HomeScreen() {
         if (completed.length) { loaded = loaded.map((r) => completed.includes(r.id) ? { ...r, enabled: false, notificationIds: [] } : r); await saveRoutines(loaded); }
         await Notifications.cancelAllScheduledNotificationsAsync();
         await syncNativeRoutines(loaded);
+        const nativeEvents = await consumeNativeRoutineEvents();
+        for (const event of nativeEvents) if (['triggered', 'dismissed', 'snoozed'].includes(event.type)) await recordRoutineEvent({ routineId: event.routineId, routineName: event.routineName, type: event.type as RoutineEvent['type'] }, event.at);
       }
       setItems(loaded);
+      setFamilyProfiles(await loadProfiles());
       setVoiceLibrary(await loadVoiceLibrary());
       void Notifications.getLastNotificationResponseAsync().then((response) => {
         if (response) {
@@ -71,7 +85,9 @@ export function HomeScreen() {
     const tapped = Notifications.addNotificationResponseReceivedListener((response) => openAlarm(response.notification.request.content.data));
     return () => { mounted = false; received.remove(); tapped.remove(); void Speech.stop(); };
   }, []);
-  const upcoming = useMemo(() => items.filter((r) => r.enabled).sort((a, b) => nextOccurrence(a).getTime() - nextOccurrence(b).getTime())[0], [items]);
+  const visibleItems = useMemo(() => routinesForProfile(items, profileFilter), [items, profileFilter]);
+  const todayItems = useMemo(() => [...visibleItems].sort((a, b) => a.time.localeCompare(b.time)), [visibleItems]);
+  const upcoming = useMemo(() => visibleItems.filter((r) => r.enabled).sort((a, b) => nextOccurrence(a).getTime() - nextOccurrence(b).getTime())[0], [visibleItems]);
   async function replaceRoutine(next: Routine) {
     if (!next.name.trim() || !/^([01]\d|2[0-3]):[0-5]\d$/.test(next.time)) {
       Alert.alert('Check routine details', 'Add a name and enter the time as HH:MM (24-hour time).');
@@ -91,7 +107,8 @@ export function HomeScreen() {
         if (!permission.granted && !(await Notifications.requestPermissionsAsync()).granted) throw new Error('Notification permission is needed to show alarms and reminders.');
       }
       if (!isNativeAlarmAndroid) for (const id of next.notificationIds) await Notifications.cancelScheduledNotificationAsync(id).catch(() => undefined);
-      const scheduled = isNativeAlarmAndroid ? { ...next, notificationIds: [] } : next.enabled ? { ...next, notificationIds: [] } : { ...next, notificationIds: [] };
+      const scheduled = { ...next, familyProfileId: next.familyProfileId ?? 'everyone', notificationIds: [] };
+      if (scheduled.enabled && !items.some((r) => r.id === scheduled.id && r.enabled)) void recordRoutineEvent({ routineId: scheduled.id, routineName: scheduled.name, type: 'scheduled' });
       const newItems = items.some((r) => r.id === scheduled.id) ? items.map((r) => r.id === scheduled.id ? scheduled : r) : [...items, scheduled];
       setItems(newItems); await saveRoutines(newItems);
       setVoiceLibrary(library);
@@ -114,13 +131,14 @@ export function HomeScreen() {
       setStopPlayback(() => stop);
     } catch (error) { Alert.alert('Could not preview routine', error instanceof Error ? error.message : 'Check the selected voice profile and audio files.'); }
   }
-  async function dismissAlarm() { if (activeAlarm && isNativeAlarmAndroid) await dismissNativeAlarm(activeAlarm.id); stopPlayback?.(); setStopPlayback(null); setActiveAlarm(null); setPlayStatus(''); }
+  async function dismissAlarm(record = true) { if (record && activeAlarm && !isNativeAlarmAndroid) void recordRoutineEvent({ routineId: activeAlarm.id, routineName: activeAlarm.name, type: 'dismissed' }); if (activeAlarm && isNativeAlarmAndroid) { await dismissNativeAlarm(activeAlarm.id); const events = await consumeNativeRoutineEvents(); for (const event of events) await recordRoutineEvent({ routineId: event.routineId, routineName: event.routineName, type: event.type as RoutineEvent['type'] }, event.at); } stopPlayback?.(); setStopPlayback(null); setActiveAlarm(null); setPlayStatus(''); }
   async function snoozeAlarm() {
     if (!activeAlarm) return;
+    if (!isNativeAlarmAndroid) void recordRoutineEvent({ routineId: activeAlarm.id, routineName: activeAlarm.name, type: 'snoozed' });
     stopPlayback?.();
     const message = activeAlarm.messageVariants?.[0]?.text ?? activeAlarm.message ?? activeAlarm.name;
     const id = isNativeAlarmAndroid ? undefined : await Notifications.scheduleNotificationAsync({ content: { title: activeAlarm.name, body: message, sound: 'default', data: { routineId: activeAlarm.id, type: activeAlarm.type } }, trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(Date.now() + activeAlarm.snoozeMinutes * 60_000) } });
-    if (isNativeAlarmAndroid) await snoozeNativeAlarm(activeAlarm.id);
+    if (isNativeAlarmAndroid) { await snoozeNativeAlarm(activeAlarm.id); const events = await consumeNativeRoutineEvents(); for (const event of events) await recordRoutineEvent({ routineId: event.routineId, routineName: event.routineName, type: event.type as RoutineEvent['type'] }, event.at); }
     const updated = items.map((r) => r.id === activeAlarm.id ? { ...r, notificationIds: id ? [...r.notificationIds, id] : r.notificationIds } : r);
     setItems(updated); await saveRoutines(updated);
     setActiveAlarm(null); setStopPlayback(null); setPlayStatus('');
@@ -130,25 +148,32 @@ export function HomeScreen() {
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.header}><Text style={styles.eyebrow}>A GENTLER START</Text><Text style={[styles.title, { color: colors.text }]}>Good day, ahead.</Text><Text style={styles.subtitle}>Your routines, ready when you are.</Text></View>
         <View style={styles.next}><Text style={styles.nextLabel}>Next scheduled</Text>{upcoming ? <><Text style={styles.nextTime}>{nextOccurrence(upcoming).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text><Text style={styles.nextName}>{upcoming.name} · {typeNames[upcoming.type]}</Text></> : <Text style={[styles.nextName, { marginTop: 8 }]}>No active routines yet</Text>}</View>
-        <View style={styles.row}><Text style={[styles.listTitle, { color: colors.text }]}>Your routines</Text><Text style={styles.meta}>{items.length} total</Text></View>
-        {items.map((r) => <Pressable key={r.id} onPress={() => { setEditing({ ...r }); setAdvanced(false); }} style={[styles.card, dark && { backgroundColor: '#202D27', borderColor: '#34463D' }]}>
+        <View style={styles.row}><Text style={[styles.listTitle, { color: colors.text }]}>Today</Text><Pressable onPress={() => { void loadRoutineHistory().then(setHistory); setHistoryOpen(true); }}><Text style={styles.action}>Recent activity</Text></Pressable></View>
+        <View style={styles.chips}>{familyProfiles.map((p) => <Pressable key={p.id} style={[styles.chip, profileFilter === p.id && styles.chipOn]} onPress={() => setProfileFilter(p.id)}><Text style={[styles.chipText, profileFilter === p.id && styles.chipTextOn]}>{p.name}</Text></Pressable>)}<Pressable style={styles.chip} onPress={() => { setProfileDrafts(familyProfiles.map((p) => ({ ...p }))); setProfilesOpen(true); }}><Text style={styles.chipText}>Manage</Text></Pressable></View>
+        {todayItems.map((r) => <Pressable key={r.id} onPress={() => { setEditing({ ...r }); setAdvanced(false); }} style={[styles.card, dark && { backgroundColor: '#202D27', borderColor: '#34463D' }]}>
           <View style={styles.cardTop}><Text style={[styles.time, dark && { color: '#D2E5D9' }]}>{r.time}</Text><View style={{ flex: 1 }}><Text style={[styles.cardName, dark && { color: '#E4EEE8' }]}>{r.name}</Text><Text style={styles.meta}>{r.type !== 'alarm' ? `${r.reminderCategory ?? 'Custom'} · ` : ''}{typeNames[r.type]} · {r.repeat === 'weekdays' ? 'Weekdays' : r.repeat === 'daily' ? 'Daily' : r.repeat === 'custom' ? 'Custom days' : 'Once'}</Text></View><Switch value={r.enabled} onValueChange={() => void toggle(r)} trackColor={{ true: '#72A18A' }} /></View>
-          <View style={[styles.badge, dark && { backgroundColor: '#2C3B34' }]}><Text style={[styles.badgeText, dark && { color: '#B9D0C3' }]}>{soundLabels[r.sound]} · {voiceLibrary?.profiles.find((p) => p.id === r.voiceProfileId)?.name ?? 'Default voice'}</Text></View>
+          <View style={[styles.badge, dark && { backgroundColor: '#2C3B34' }]}><Text style={[styles.badgeText, dark && { color: '#B9D0C3' }]}>{soundLabels[r.sound]} · {voiceLibrary?.profiles.find((p) => p.id === r.voiceProfileId)?.name ?? 'Default voice'} · {familyProfiles.find((p) => p.id === (r.familyProfileId ?? 'everyone'))?.name ?? 'Everyone'}</Text></View>
+          <View style={[styles.row, { marginTop: 10 }]}><Pressable onPress={() => void preview(r)}><Text style={styles.action}>Preview</Text></Pressable><Text style={styles.meta}>{r.enabled ? 'Enabled' : 'Disabled'}</Text><Pressable onPress={() => void recordRoutineEvent({ routineId: r.id, routineName: r.name, type: 'skipped' })}><Text style={styles.action}>Skip today</Text></Pressable></View>
         </Pressable>)}
-        <Pressable style={styles.add} onPress={() => { void loadDefaults().then(async (defaults) => { const library = await loadVoiceLibrary(); setVoiceLibrary(library); setEditing({ ...blank, id: `new-${Date.now()}`, ...defaults, voiceProfileId: library.defaultProfileId }); setAdvanced(false); }); }}><Text style={styles.addText}>＋  Add routine</Text></Pressable>
+        {!todayItems.length && <Text style={styles.subtitle}>No upcoming enabled routines for this filter.</Text>}
+        <Pressable style={styles.add} onPress={() => setTemplatePicker(true)}><Text style={styles.addText}>＋  Add routine</Text></Pressable>
+        <Pressable onPress={() => void loadRoutineHistory().then(setHistory).then(() => setHistoryOpen(true))}><Text style={[styles.action, { textAlign: 'center', marginBottom: 22 }]}>View recent activity</Text></Pressable>
       </ScrollView>
       {playStatus ? <Pressable onPress={() => { stopPlayback?.(); setStopPlayback(null); setPlayStatus(''); }} style={styles.preview}><Text style={styles.previewText}>{playStatus} · Tap to stop</Text></Pressable> : null}
     </View>
+    <Modal visible={templatePicker} animationType="slide" onRequestClose={() => setTemplatePicker(false)}><SafeAreaView style={styles.modal}><View style={styles.modalHead}><Pressable onPress={() => setTemplatePicker(false)}><Text style={styles.action}>Cancel</Text></Pressable><Text style={styles.modalTitle}>Choose a template</Text><View style={{ width: 48 }} /></View><ScrollView contentContainerStyle={{ padding: 20 }}>{routineTemplates.map((template) => <Pressable key={template.id} style={styles.card} onPress={() => { void loadDefaults().then(async (defaults) => { const library = await loadVoiceLibrary(); setVoiceLibrary(library); setEditing({ ...blank, ...defaults, id: `new-${Date.now()}`, name: template.name, type: template.type, time: template.time, sound: template.sound, message: template.message, messageVariants: [{ id: 'message-default', text: template.message }], reminderBehavior: template.reminderBehavior, tone: template.tone, voiceProfileId: library.defaultProfileId, familyProfileId: 'everyone' }); setAdvanced(false); setTemplatePicker(false); }); }}><Text style={styles.cardName}>{template.name}</Text><Text style={styles.meta}>{template.time} · {typeNames[template.type]} · {soundLabels[template.sound]}</Text></Pressable>)}<Pressable style={styles.add} onPress={() => { setTemplatePicker(false); void loadDefaults().then(async (defaults) => { const library = await loadVoiceLibrary(); setVoiceLibrary(library); setEditing({ ...blank, id: `new-${Date.now()}`, ...defaults, voiceProfileId: library.defaultProfileId, familyProfileId: 'everyone' }); setAdvanced(false); }); }}><Text style={styles.addText}>Start from blank</Text></Pressable></ScrollView></SafeAreaView></Modal>
+    <Modal visible={profilesOpen} animationType="slide" onRequestClose={() => setProfilesOpen(false)}><SafeAreaView style={styles.modal}><View style={styles.modalHead}><Pressable onPress={() => setProfilesOpen(false)}><Text style={styles.action}>Cancel</Text></Pressable><Text style={styles.modalTitle}>Family profiles</Text><Pressable onPress={() => { const cleaned = profileDrafts.filter((p) => p.name.trim()); const allowed = new Set(cleaned.map((p) => p.id)); const updated = items.map((r) => allowed.has(r.familyProfileId ?? 'everyone') ? r : { ...r, familyProfileId: 'everyone' }); setFamilyProfiles(cleaned); setItems(updated); void saveProfiles(cleaned); void saveRoutines(updated); if (!allowed.has(profileFilter)) setProfileFilter('everyone'); setProfilesOpen(false); }}><Text style={styles.action}>Save</Text></Pressable></View><ScrollView contentContainerStyle={{ padding: 20 }}>{profileDrafts.map((p) => <View key={p.id} style={styles.row}><TextInput value={p.name} editable={p.id !== 'everyone'} onChangeText={(name) => setProfileDrafts(profileDrafts.map((item) => item.id === p.id ? { ...item, name } : item))} style={[styles.input, { flex: 1 }]} /><Pressable disabled={p.id === 'everyone'} onPress={() => setProfileDrafts(profileDrafts.filter((item) => item.id !== p.id))}><Text style={[styles.action, p.id === 'everyone' && { color: '#AAA' }]}>Delete</Text></Pressable></View>)}<Pressable style={styles.add} onPress={() => setProfileDrafts([...profileDrafts, { id: `family-${Date.now()}`, name: '' }])}><Text style={styles.addText}>＋  Add profile</Text></Pressable><Text style={styles.meta}>Everyone is the shared label. Deleting a profile moves its routines to Everyone.</Text></ScrollView></SafeAreaView></Modal>
+    <Modal visible={historyOpen} animationType="slide" onRequestClose={() => setHistoryOpen(false)}><SafeAreaView style={styles.modal}><View style={styles.modalHead}><Pressable onPress={() => setHistoryOpen(false)}><Text style={styles.action}>Done</Text></Pressable><Text style={styles.modalTitle}>Recent activity</Text><View style={{ width: 42 }} /></View><ScrollView contentContainerStyle={{ padding: 20 }}>{history.map((event) => <View key={event.id} style={styles.card}><Text style={styles.cardName}>{event.routineName}</Text><Text style={styles.meta}>{event.type} · {new Date(event.at).toLocaleString()}</Text></View>)}{!history.length && <Text style={styles.subtitle}>Routine events from the last 30 days will appear here.</Text>}</ScrollView></SafeAreaView></Modal>
     <Modal visible={editing !== null} animationType="slide" onRequestClose={() => setEditing(null)}>
-      {editing && <RoutineEditor routine={editing} profiles={voiceLibrary?.profiles ?? []} defaultProfileId={voiceLibrary?.defaultProfileId} advanced={advanced} setAdvanced={setAdvanced} onChange={setEditing} onClose={() => setEditing(null)} onPreview={() => void preview(editing)} onSave={() => void replaceRoutine(editing)} onDelete={() => remove(editing)} />}
+      {editing && <RoutineEditor routine={editing} profiles={voiceLibrary?.profiles ?? []} familyProfiles={familyProfiles} defaultProfileId={voiceLibrary?.defaultProfileId} advanced={advanced} setAdvanced={setAdvanced} onChange={setEditing} onClose={() => setEditing(null)} onPreview={() => void preview(editing)} onSave={() => void replaceRoutine(editing)} onDelete={() => remove(editing)} />}
     </Modal>
     <Modal visible={activeAlarm !== null} animationType="fade" onRequestClose={() => void dismissAlarm()}>
-      {activeAlarm && <SafeAreaView style={styles.active}><Text style={styles.activeTime}>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text><Text style={styles.activeName}>{activeAlarm.name}</Text><Text style={styles.activeDetail}>{soundLabels[activeAlarm.sound]} is playing{playStatus ? ` · ${playStatus.toLowerCase()}` : ''}</Text><Pressable style={styles.dismiss} onPress={() => void dismissAlarm()}><Text style={styles.dismissText}>Dismiss</Text></Pressable><Pressable style={styles.snooze} onPress={() => void snoozeAlarm()}><Text style={styles.snoozeText}>Snooze · {activeAlarm.snoozeMinutes} min</Text></Pressable></SafeAreaView>}
+      {activeAlarm && <SafeAreaView style={styles.active}><Text style={styles.activeTime}>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text><Text style={styles.activeName}>{activeAlarm.name}</Text><Text style={styles.activeDetail}>{soundLabels[activeAlarm.sound]} is playing{playStatus ? ` · ${playStatus.toLowerCase()}` : ''}</Text><Pressable style={styles.dismiss} onPress={() => { void recordRoutineEvent({ routineId: activeAlarm.id, routineName: activeAlarm.name, type: 'completed' }); void dismissAlarm(false); }}><Text style={styles.dismissText}>Mark complete</Text></Pressable><Pressable style={styles.snooze} onPress={() => void snoozeAlarm()}><Text style={styles.snoozeText}>Snooze · {activeAlarm.snoozeMinutes} min</Text></Pressable></SafeAreaView>}
     </Modal>
   </SafeAreaView>;
 }
 
-function RoutineEditor({ routine, profiles, defaultProfileId, advanced, setAdvanced, onChange, onClose, onPreview, onSave, onDelete }: { routine: Routine; profiles: VoiceProfile[]; defaultProfileId?: string; advanced: boolean; setAdvanced: (v: boolean) => void; onChange: (v: Routine) => void; onClose: () => void; onPreview: () => void; onSave: () => void; onDelete: () => void }) {
+function RoutineEditor({ routine, profiles, familyProfiles, defaultProfileId, advanced, setAdvanced, onChange, onClose, onPreview, onSave, onDelete }: { routine: Routine; profiles: VoiceProfile[]; familyProfiles: FamilyProfile[]; defaultProfileId?: string; advanced: boolean; setAdvanced: (v: boolean) => void; onChange: (v: Routine) => void; onClose: () => void; onPreview: () => void; onSave: () => void; onDelete: () => void }) {
   const dark = useColorScheme() === 'dark';
   const set = <K extends keyof Routine>(key: K, value: Routine[K]) => onChange({ ...routine, [key]: value });
   const profile = profiles.find((item) => item.id === routine.voiceProfileId) ?? profiles.find((item) => item.id === defaultProfileId) ?? profiles[0];
@@ -163,6 +188,7 @@ function RoutineEditor({ routine, profiles, defaultProfileId, advanced, setAdvan
       {routine.type !== 'alarm' && <><Text style={[styles.label, dark && { color: '#C5D6CC' }]}>Reminder playback</Text>{options(['Notification only', 'Notification + sound', 'Notification + spoken message'], routine.reminderBehavior === 'sound' ? 'Notification + sound' : routine.reminderBehavior === 'spoken' ? 'Notification + spoken message' : 'Notification only', (v) => set('reminderBehavior', v === 'Notification + sound' ? 'sound' : v === 'Notification + spoken message' ? 'spoken' : 'notification-only'))}</>}
       <View style={{ flexDirection: 'row', gap: 12 }}><View style={{ flex: 1 }}><Text style={[styles.label, dark && { color: '#C5D6CC' }]}>Time</Text><TextInput value={routine.time} onChangeText={(v) => set('time', v)} placeholder="07:00" keyboardType="numbers-and-punctuation" style={[styles.input, dark && { backgroundColor: '#202D27', borderColor: '#34463D', color: '#E4EEE8' }]} /></View><View style={{ flex: 1 }}><Text style={[styles.label, dark && { color: '#C5D6CC' }]}>Repeat</Text>{options(['Once', 'Weekdays', 'Daily', 'Custom'], routine.repeat === 'once' ? 'Once' : routine.repeat === 'weekdays' ? 'Weekdays' : routine.repeat === 'daily' ? 'Daily' : 'Custom', (v) => set('repeat', v === 'Once' ? 'once' : v === 'Weekdays' ? 'weekdays' : v === 'Daily' ? 'daily' : 'custom'))}</View></View>
       {routine.repeat === 'custom' && <><Text style={[styles.label, dark && { color: '#C5D6CC' }]}>Days</Text><View style={styles.chips}>{weekdayNames.map((day, i) => <Pressable key={day} style={[styles.chip, routine.days.includes(i) && styles.chipOn]} onPress={() => set('days', routine.days.includes(i) ? routine.days.filter((d) => d !== i) : [...routine.days, i])}><Text style={[styles.chipText, routine.days.includes(i) && styles.chipTextOn]}>{day}</Text></Pressable>)}</View></>}
+      <Text style={[styles.label, dark && { color: '#C5D6CC' }]}>Family profile</Text>{options(familyProfiles.map((p) => p.name), familyProfiles.find((p) => p.id === (routine.familyProfileId ?? 'everyone'))?.name ?? 'Everyone', (name) => { const selected = familyProfiles.find((p) => p.name === name); if (selected) set('familyProfileId', selected.id); })}
       <View style={styles.line}><Text style={styles.lineLabel}>Enabled (starts scheduling)</Text><Switch value={routine.enabled} onValueChange={(v) => set('enabled', v)} /></View>
       <Text style={[styles.section, dark && { color: '#A9C4B5' }]}>Message & voice</Text><Text style={[styles.label, dark && { color: '#C5D6CC' }]}>Voice profile</Text>{options(profiles.map((p) => p.name), profile?.name ?? '', (name) => { const selected = profiles.find((p) => p.name === name); if (selected) onChange({ ...routine, voiceProfileId: selected.id }); })}
       {profile?.kind === 'recording' ? <Text style={styles.meta}>{profile.recordingIds?.length ?? 0} clips · a random clip is selected for each playback. Manage clips in Settings → Voice Library.</Text> : <>
@@ -171,6 +197,7 @@ function RoutineEditor({ routine, profiles, defaultProfileId, advanced, setAdvan
         <Text style={[styles.label, dark && { color: '#C5D6CC' }]}>Speaking tone</Text>{options(['Gentle', 'Cheerful', 'Firm', 'Playful'], routine.ttsOverrides?.tone ?? profile?.tts?.tone ?? 'Gentle', (v) => set('ttsOverrides', { ...routine.ttsOverrides, tone: v as NonNullable<Routine['ttsOverrides']>['tone'] }))}
         <Text style={styles.meta}>Tone changes pace and pitch; it does not make TTS sound emotionally expressive.</Text>
       </>}
+      {routine.type === 'sleep' && <><Text style={[styles.label, dark && { color: '#C5D6CC' }]}>Ambient sound timer · minutes</Text>{options(['5', '15', '30', '60', 'Custom'], [5, 15, 30, 60].includes(routine.sleepTimerMinutes ?? 30) ? String(routine.sleepTimerMinutes ?? 30) : 'Custom', (v) => { if (v === 'Custom') set('sleepTimerMinutes', routine.sleepTimerMinutes ?? 45); else set('sleepTimerMinutes', Number(v)); })}{![5, 15, 30, 60].includes(routine.sleepTimerMinutes ?? 30) && <TextInput value={String(routine.sleepTimerMinutes ?? 45)} onChangeText={(v) => set('sleepTimerMinutes', Math.max(1, Math.min(180, Number(v) || 1)))} keyboardType="number-pad" style={[styles.input, dark && { backgroundColor: '#202D27', borderColor: '#34463D', color: '#E4EEE8' }]} />}</>}
       <View style={styles.advanced}><Pressable onPress={() => setAdvanced(!advanced)}><Text style={styles.lineLabel}>{advanced ? '−' : '+'}  Audio options</Text></Pressable></View>
       {advanced && <><Text style={[styles.section, dark && { color: '#A9C4B5' }]}>Intro sound</Text>{options(soundValues.map((v) => soundLabels[v]), soundLabels[routine.sound], (v) => set('sound', soundValues.find((s) => soundLabels[s] === v) ?? 'none'))}
         <Text style={[styles.label, dark && { color: '#C5D6CC' }]}>Intro delay · seconds</Text><TextInput value={String(routine.introSeconds)} onChangeText={(v) => set('introSeconds', Math.max(0, Number(v) || 0))} keyboardType="number-pad" style={[styles.input, dark && { backgroundColor: '#202D27', borderColor: '#34463D', color: '#E4EEE8' }]} />
