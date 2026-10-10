@@ -24,7 +24,7 @@ object AlarmNotifications {
     val id = routine.optString("id")
     val activity = PendingIntent.getActivity(context, id.hashCode(), Intent(context, AlarmActivity::class.java).putExtra("id", id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     val builder = notificationBuilder(context, if (alarm) ALARM_CHANNEL else PLAYBACK_CHANNEL)
-      .setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle(routine.optString("name")).setContentText(if (routine.optBoolean("recordingUnavailable")) "Voice recording is unavailable" else if (alarm) "Alarm is ringing" else "Reminder is playing")
+      .setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle(routine.optString("name")).setContentText(if (routine.optBoolean("recordingUnavailable")) "Voice recording unavailable · ${routine.optString("time")}" else if (alarm) "Wake-up alarm · ${routine.optString("time")}" else "${routine.optString("type", "reminder").replaceFirstChar { it.uppercase() }} · ${routine.optString("time")}")
       .setCategory(if (alarm) Notification.CATEGORY_ALARM else Notification.CATEGORY_REMINDER).setOngoing(alarm).setContentIntent(activity).setVisibility(Notification.VISIBILITY_PUBLIC)
     if (alarm) {
       builder.addAction(android.R.drawable.ic_media_pause, "Snooze", action(context, id, true))
@@ -38,7 +38,9 @@ object AlarmNotifications {
     val open = PendingIntent.getActivity(context, routine.optString("id").hashCode(), Intent(context, AlarmActivity::class.java).putExtra("id", routine.optString("id")), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     val variants = routine.optJSONArray("messageVariants")
     val text = variants?.optJSONObject(if (variants.length() > 0) (Math.random() * variants.length()).toInt() else 0)?.optString("text")?.takeIf { it.isNotBlank() } ?: routine.optString("message", "Your reminder is due.")
-    val notification = notificationBuilder(context, ALARM_CHANNEL).setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle(routine.optString("name")).setContentText(text).setContentIntent(open).setAutoCancel(true).build()
+    val type = routine.optString("type", "reminder").replaceFirstChar { it.uppercase() }
+    val notification = notificationBuilder(context, ALARM_CHANNEL).setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentTitle(routine.optString("name")).setContentText("$type · ${routine.optString("time")}: $text").setContentIntent(open).setAutoCancel(true)
+      .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dismiss", action(context, routine.optString("id"), false)).build()
     context.getSystemService(NotificationManager::class.java).notify(routine.optString("id").hashCode(), notification)
   }
   fun postAlarmFallback(context: Context, routine: JSONObject) {

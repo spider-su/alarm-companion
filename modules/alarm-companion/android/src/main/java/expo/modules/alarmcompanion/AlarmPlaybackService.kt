@@ -119,6 +119,8 @@ class AlarmPlaybackService : Service() {
   private var repeat: Runnable? = null
   private var previewTimeout: Runnable? = null
   private var reminderFinish: Runnable? = null
+  private var sleepTimer: Runnable? = null
+  private var sleepFade: Runnable? = null
   private var ttsRetry: Runnable? = null
   private var focus: AudioFocusRequest? = null
   private var focusListener: AudioManager.OnAudioFocusChangeListener? = null
@@ -281,8 +283,8 @@ class AlarmPlaybackService : Service() {
       if (!sessions.isCurrent(generation) || stopped) return@Runnable
       if (preview || alarm || routine.optString("reminderBehavior", "notification-only") == "spoken") speak(routine, generation)
       else {
-        reminderFinish = Runnable { if (sessions.isCurrent(generation)) finishSession(generation) }
-        handler.postDelayed(reminderFinish!!, 30_000)
+        if (routine.optString("type") == "sleep") startSleepTimer(routine, generation)
+        else { reminderFinish = Runnable { if (sessions.isCurrent(generation)) finishSession(generation) }; handler.postDelayed(reminderFinish!!, 30_000) }
       }
     }
     handler.postDelayed(intro!!, speechDelay)
@@ -363,13 +365,34 @@ class AlarmPlaybackService : Service() {
     val volume = routine.optDouble("backgroundVolume", .35).toFloat()
     runCatching { player?.setVolume(volume, volume) }
     if (!alarm) {
-      reminderFinish = Runnable { if (sessions.isCurrent(generation)) finishSession(generation) }
-      handler.postDelayed(reminderFinish!!, 30_000L)
+      if (routine.optString("type") == "sleep") startSleepTimer(routine, generation)
+      else { reminderFinish = Runnable { if (sessions.isCurrent(generation)) finishSession(generation) }; handler.postDelayed(reminderFinish!!, 30_000L) }
     }
     else if (routine.optBoolean("repeatVoice")) {
       repeat = Runnable { speak(routine, generation) }
       handler.postDelayed(repeat!!, 15_000)
     }
+  }
+
+  private fun startSleepTimer(routine: JSONObject, generation: Long) {
+    if (sleepTimer != null || !sessions.isCurrent(generation)) return
+    val minutes = SleepTimerPolicy.delayMinutes(routine.optInt("sleepTimerMinutes", 30))
+    sleepTimer = Runnable {
+      if (!sessions.isCurrent(generation)) return@Runnable
+      val started = System.currentTimeMillis()
+      val initialVolume = routine.optDouble("backgroundVolume", .35).toFloat().coerceIn(0f, 1f)
+      val fadeOut = object : Runnable {
+        override fun run() {
+          if (!sessions.isCurrent(generation)) return
+          val progress = SleepTimerPolicy.fadeProgress(System.currentTimeMillis() - started)
+          runCatching { player?.setVolume(initialVolume * (1f - progress), initialVolume * (1f - progress)) }
+          if (progress >= 1f) finishSession(generation) else { sleepFade = this; handler.postDelayed(this, 500L) }
+        }
+      }
+      sleepFade = fadeOut
+      handler.post(fadeOut)
+    }
+    handler.postDelayed(sleepTimer!!, minutes * 60_000L)
   }
 
   private fun requestFocus(generation: Long) {
@@ -428,8 +451,8 @@ class AlarmPlaybackService : Service() {
   }
 
   private fun cancelCallbacks() {
-    listOf(fade, intro, repeat, previewTimeout, reminderFinish, ttsRetry).forEach { callback -> if (callback != null) handler.removeCallbacks(callback) }
-    fade = null; intro = null; repeat = null; previewTimeout = null; reminderFinish = null; ttsRetry = null
+    listOf(fade, intro, repeat, previewTimeout, reminderFinish, ttsRetry, sleepTimer, sleepFade).forEach { callback -> if (callback != null) handler.removeCallbacks(callback) }
+    fade = null; intro = null; repeat = null; previewTimeout = null; reminderFinish = null; ttsRetry = null; sleepTimer = null; sleepFade = null
   }
 
   private fun abandonFocus() {

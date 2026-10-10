@@ -14,6 +14,7 @@ export type Routine = {
   reminderBehavior?: ReminderBehavior;
   reminderCategory?: ReminderCategory;
   voiceProfileId?: string; ttsOverrides?: Partial<TtsVoiceSettings>; messageVariants?: TextVariant[]; previewAudioUri?: string;
+  familyProfileId?: string; sleepTimerMinutes?: number;
 };
 
 const STORAGE_KEY = 'alarm-companion.routines.v1';
@@ -50,7 +51,7 @@ export async function loadRoutines(): Promise<Routine[]> {
   const value = await AsyncStorage.getItem(STORAGE_KEY);
   let routines = demoRoutines;
   if (value) { try { routines = JSON.parse(value) as Routine[]; } catch { await AsyncStorage.removeItem(STORAGE_KEY); } }
-  const migrated = await migrateRoutineVoices(routines);
+  const migrated = await migrateRoutineVoices(routines.map((routine) => ({ ...routine, familyProfileId: routine.familyProfileId ?? 'everyone' })));
   await saveRoutines(migrated);
   return migrated;
 }
