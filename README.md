@@ -52,7 +52,9 @@ Home shows routines in time order, including disabled entries, with their status
 
 Sleep routines include a 5, 15, 30, or 60 minute ambient sound timer. On Android, the existing playback foreground service gradually fades the ambient track over the final 30 seconds and releases it. The timer begins after any spoken message finishes (or when sound-only playback begins); system process termination and device-specific restrictions can still affect playback.
 
-Home's Recent activity keeps a local, 30-day event list. It records schedule enablement, Android alarm/reminder triggers and notification-action snooze/dismiss events, explicit completion, and Skip today. Native Android events queue in app-private preferences and are copied into local history when the app resumes. Dismissing is not treated as completion. History is not synced or backed up.
+Home's Recent activity shows the last 30 days of local events, including schedule enablement, Android alarm/reminder triggers and notification-action snooze/dismiss events, explicit completion, and Skip today. Native Android events queue in app-private preferences and are copied into local history when the app resumes. Completion events remain locally stored as the source for lifetime achievements; other history is trimmed to 30 days. Dismissing is not treated as completion. History is not synced or backed up.
+
+Eligible reminders and sleep routines can be explicitly marked done once per occurrence; wake-up alarms are excluded. Progress is calculated by local profile from completion history. A small predefined achievement set unlocks per profile and keeps durable unlock dates, including after older history ages out. An accidental completion can be undone from Home or Recent activity, and any milestone tied to it is removed. Profile feedback can be disabled or set to English or Polish. Celebrations are text-only, so they do not start audio or interrupt an alarm.
 
 ## Voice Library
 
@@ -79,7 +81,7 @@ The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Verification and manual Android checklist
 
-Automated checks cover TypeScript, lint, family template defaults and filtering, 30-day history selection, profile/routine migration, tone resolution, message and recording selection, and JS schedule/snooze calculations. The Android debug APK build compiles the native module and manifest. These checks do not prove AlarmManager, notification, audio, or lock-screen behavior on a physical Android device.
+Automated checks cover TypeScript, lint, family template defaults and filtering, completion idempotence and undo, profile-isolated progress, local-week achievement thresholds, durable unlock records, 30-day activity selection, profile/routine migration, tone resolution, message and recording selection, and JS schedule/snooze calculations. The Android debug APK build compiles the native module and manifest. These checks do not prove AlarmManager, notification, audio, or lock-screen behavior on a physical Android device.
 
 - [ ] Alarm in 2 minutes with app open.
 - [ ] Alarm in 2 minutes with app backgrounded.
@@ -102,6 +104,9 @@ Automated checks cover TypeScript, lint, family template defaults and filtering,
 - [ ] Create a routine from each template and verify it stays disabled until enabled.
 - [ ] Add/rename/delete local profiles and verify deleted routines move to Everyone.
 - [ ] Start a sleep routine with voice and without voice, then verify timer fade and stop in background.
-- [ ] Verify recent activity and its 30-day retention.
+- [ ] Verify recent activity and its 30-day display window.
+- [ ] Mark a reminder complete, undo it, and verify alarms never count as completions.
+- [ ] Verify profile progress, achievement unlocks after restart, and English/Polish feedback preferences.
+- [ ] Complete a milestone during alarm playback and confirm no celebration audio interrupts it (feedback is text-only).
 
-No physical Android device or emulator was available during implementation; the build is ready for device validation, not verified for end-to-end reliability.
+An Android 35 emulator smoke check verified app launch and the Home, Progress, Settings, Voice Library, and routine editor screens. Notification permission remained denied, so scheduled completion and notification flows could not be exercised. No physical Android device was available; alarm delivery, locked-screen actions, and background behavior remain unverified end to end.
