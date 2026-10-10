@@ -1,14 +1,16 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/native';
 import { useColorScheme } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { HomeScreen } from './screens/HomeScreen';
+import { DashboardScreen } from './screens/DashboardScreen';
+import { RoutinesScreen } from './screens/HomeScreen';
+import { FamilyScreen } from './screens/FamilyScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
-import { AchievementsScreen } from './screens/AchievementsScreen';
-import { VoiceLibraryScreen } from './screens/VoiceLibraryScreen';
 import { getTabBarMetrics } from './platform/safeArea';
+import type { AppTabParamList } from './navigationTypes';
 
-const Tab = createBottomTabNavigator();
+const Tab = createBottomTabNavigator<AppTabParamList>();
 
 function Tabs() {
   const insets = useSafeAreaInsets();
@@ -18,10 +20,10 @@ function Tabs() {
       headerShown: false,
       tabBarStyle: { height: tabBar.height, paddingTop: tabBar.paddingTop, paddingBottom: tabBar.paddingBottom }
     }}>
-      <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Routines', tabBarLabel: 'Routines' }} />
-      <Tab.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings', tabBarLabel: 'Settings' }} />
-      <Tab.Screen name="Achievements" component={AchievementsScreen} options={{ title: 'Achievements', tabBarLabel: 'Progress' }} />
-      <Tab.Screen name="VoiceLibrary" component={VoiceLibraryScreen} options={{ title: 'Voice Library', tabBarLabel: 'Voices' }} />
+      <Tab.Screen name="Home" component={DashboardScreen} options={{ title: 'Home', tabBarLabel: 'Home', tabBarIcon: ({ color, size }) => <Ionicons name="home-outline" color={color} size={size} /> }} />
+      <Tab.Screen name="Routines" component={RoutinesScreen} options={{ title: 'Routines', tabBarLabel: 'Routines', tabBarIcon: ({ color, size }) => <Ionicons name="alarm-outline" color={color} size={size} /> }} />
+      <Tab.Screen name="Family" component={FamilyScreen} options={{ title: 'Family', tabBarLabel: 'Family', tabBarIcon: ({ color, size }) => <Ionicons name="people-outline" color={color} size={size} /> }} />
+      <Tab.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings', tabBarLabel: 'Settings', tabBarIcon: ({ color, size }) => <Ionicons name="settings-outline" color={color} size={size} /> }} />
     </Tab.Navigator>
   );
 }
