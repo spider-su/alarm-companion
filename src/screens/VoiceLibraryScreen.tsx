@@ -14,7 +14,7 @@ import { startAfterRecordingPermission } from '../audio/recordingPermission';
 
 const styles = StyleSheet.create({ safe: { flex: 1, backgroundColor: '#F7F9F7' }, content: { flex: 1, padding: 20 }, title: { color: '#18352E', fontSize: 27, fontWeight: '700', marginTop: 18 }, intro: { color: '#718079', fontSize: 13, lineHeight: 19, marginTop: 8, marginBottom: 12 }, section: { color: '#557165', fontSize: 12, letterSpacing: 1.2, fontWeight: '700', marginTop: 20, marginBottom: 8, textTransform: 'uppercase' }, card: { backgroundColor: 'white', borderRadius: 15, borderWidth: 1, borderColor: '#E4EBE6', padding: 14, marginBottom: 9 }, row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }, name: { color: '#253A32', fontSize: 15, fontWeight: '700', flex: 1 }, detail: { color: '#728079', fontSize: 12, lineHeight: 18, marginTop: 5 }, input: { borderColor: '#DCE5DF', borderWidth: 1, borderRadius: 10, paddingHorizontal: 11, paddingVertical: 9, color: '#20362E', backgroundColor: 'white', fontSize: 14, marginTop: 8 }, button: { minHeight: 42, paddingHorizontal: 13, justifyContent: 'center', alignItems: 'center', backgroundColor: '#E8F1EB', borderRadius: 12, marginTop: 8 }, primary: { backgroundColor: '#2D6A55' }, buttonText: { color: '#2D6A55', fontWeight: '700', fontSize: 13 }, primaryText: { color: 'white' }, chip: { borderColor: '#DCE5DF', borderWidth: 1, borderRadius: 18, paddingHorizontal: 10, paddingVertical: 7, marginLeft: 6 }, warning: { backgroundColor: '#F4F0E6', borderRadius: 12, padding: 12, color: '#695D3B', fontSize: 12, lineHeight: 18 } });
 
-export function VoiceLibraryScreen() {
+export function VoiceLibraryScreen({ embedded = false }: { embedded?: boolean } = {}) {
   const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, directory: 'document' });
   const recorderState = useAudioRecorderState(recorder, 250);
   const [library, setLibrary] = useState<VoiceLibrary>(initialVoiceLibrary);
@@ -33,7 +33,12 @@ export function VoiceLibraryScreen() {
     void Promise.all([loadVoiceLibrary(), Speech.getAvailableVoicesAsync().catch(() => [])]).then(([saved, voices]) => {
       if (live) { setLibrary(saved); setTtsVoices(voices); }
     });
-    return () => { live = false; previewStopRef.current?.(); if (recorderRef.current.isRecording) void recorderRef.current.stop(); void Speech.stop(); };
+    return () => {
+      live = false;
+      try { previewStopRef.current?.(); } catch { /* Preview may already be disposed with the screen. */ }
+      try { if (recorderRef.current.isRecording) void recorderRef.current.stop().catch(() => undefined); } catch { /* The recorder hook may release its native object first. */ }
+      void Speech.stop().catch(() => undefined);
+    };
   }, []);
 
   async function persist(next: VoiceLibrary) {
@@ -164,8 +169,8 @@ export function VoiceLibraryScreen() {
     } catch (error) { Alert.alert('Voice unavailable', error instanceof Error ? error.message : 'Android will use an installed fallback voice during playback.'); }
   }
 
-  return <SafeAreaView edges={appSafeAreaEdges} style={styles.safe}><ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
-    <Text style={styles.title}>Voice Library</Text>
+  return <SafeAreaView edges={embedded ? [] : appSafeAreaEdges} style={styles.safe}><ScrollView style={styles.content} keyboardShouldPersistTaps="handled">
+    {!embedded && <Text style={styles.title}>Voice Library</Text>}
     <Text style={styles.intro}>Profiles are stored locally and can be reused by multiple routines. Ask for permission before recording or importing another person's voice.</Text>
     {status ? <Text style={styles.detail}>{status}{recorderState.isRecording ? ` ${Math.floor(recorderState.durationMillis / 1000)}s` : ''}</Text> : null}
 
