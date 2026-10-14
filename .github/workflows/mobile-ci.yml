@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: mobile-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -78,4 +82,4 @@ jobs:
           name: alarm-companion-standalone-test-apk
           path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: ${{ github.event_name == 'push' && 5 || 3 }}
