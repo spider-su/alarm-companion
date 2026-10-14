@@ -58,13 +58,24 @@ jobs:
       - run: npm ci
       - name: Generate native Android project locally
         run: npx expo prebuild --clean --platform android
-      - name: Assemble debug APK on GitHub runner
+      # Assemble a standalone APK with an embedded JS bundle (no Metro server).
+      # Expo's generated Gradle template signs release builds with the Android
+      # debug keystore by default; this artifact is for device testing only.
+      - name: Assemble standalone test APK
         working-directory: android
-        run: ./gradlew --no-daemon assembleDebug
-      - name: Upload APK artifact
+        run: ./gradlew --no-daemon assembleRelease
+      - name: Verify standalone APK exists and is signed
+        run: |
+          set -euo pipefail
+          APK=$(find android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
+          test -n "$APK"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
+          echo "Standalone APK: $APK"
+      - name: Upload standalone Android APK
         uses: actions/upload-artifact@v6
         with:
-          name: alarm-companion-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: alarm-companion-standalone-test-apk
+          path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 14
