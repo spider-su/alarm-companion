@@ -24,7 +24,7 @@ const styles = StyleSheet.create({
   action: { color: '#2D6A55', fontSize: 16, fontWeight: '700', minWidth: 60, minHeight: 44, textAlignVertical: 'center' },
   headTitle: { fontSize: 19, fontWeight: '700', color: '#18352E' },
   scroll: { flex: 1 },
-  content: { padding: 20, paddingBottom: 28 },
+  content: { padding: 20, paddingBottom: 96 },
   progress: { color: '#648074', fontSize: 13, fontWeight: '700', marginBottom: 10 },
   title: { color: '#18352E', fontSize: 26, fontWeight: '700', marginBottom: 6 },
   intro: { color: '#718079', fontSize: 14, lineHeight: 21, marginBottom: 18 },
@@ -108,7 +108,7 @@ export function RoutineEditor({ routine, initialStep = 0, profiles, familyProfil
 
   return <SafeAreaView edges={appSafeAreaEdges} style={[styles.safe, dark && { backgroundColor: colors.bg }]}>
     {header}
-    <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+    <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={styles.content}>
       {creating && <><Text style={[styles.progress, dark && { color: '#9BC5AA' }]}>STEP {step + 1} OF 3</Text><Text style={[styles.title, dark && { color: colors.text }]}>{sectionTitle}</Text></>}
       {(step === 0 || !creating) && <>
         {creating && <Text style={[styles.intro, dark && { color: colors.muted }]}>Choose a starting point. You can adjust the details next.</Text>}

@@ -66,7 +66,7 @@ export function DashboardScreen() {
   return <SafeAreaView edges={appSafeAreaEdges} style={[styles.safe, { backgroundColor: dark ? '#111A17' : '#F7F9F7' }]}>
     <ScrollView contentContainerStyle={styles.content}>
       <Text style={styles.greeting}>A little more ease for your day</Text>
-      <Text style={[styles.title, { color: textColor }]}>Good morning</Text>
+      <Text style={[styles.title, { color: textColor }]}>{now.getHours() < 12 ? "Good morning" : now.getHours() < 17 ? "Good afternoon" : "Good evening"}</Text>
       <Text style={styles.subtitle}>Your family’s alarms and reminders, at a glance.</Text>
       {!enabled.length ? <View style={styles.empty}>
         <Text style={[styles.emptyTitle, { color: textColor }]}>Nothing is turned on yet</Text>
