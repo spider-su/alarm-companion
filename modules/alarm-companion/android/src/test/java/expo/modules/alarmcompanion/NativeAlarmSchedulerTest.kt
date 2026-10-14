@@ -7,6 +7,19 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class NativeAlarmSchedulerTest {
+  @Test fun scheduledAlarmStillStartsPlaybackWithoutExactAlarmAccess() {
+    assertEquals(true, NativeAlarmScheduler.shouldStartPlayback("alarm", "notification-only", false))
+  }
+
+  @Test fun spokenReminderRequiresExactAlarmAccess() {
+    assertEquals(false, NativeAlarmScheduler.shouldStartPlayback("reminder", "spoken", false))
+    assertEquals(true, NativeAlarmScheduler.shouldStartPlayback("reminder", "spoken", true))
+  }
+
+  @Test fun notificationOnlyReminderDoesNotStartPlayback() {
+    assertEquals(false, NativeAlarmScheduler.shouldStartPlayback("reminder", "notification-only", true))
+  }
+
   @Test fun dailyKeepsLocalWallClockAfterSpringDstChange() {
     val zone = TimeZone.getTimeZone("Europe/Warsaw")
     val now = Calendar.getInstance(zone).apply { set(2026, Calendar.MARCH, 28, 23, 45, 0) }.timeInMillis

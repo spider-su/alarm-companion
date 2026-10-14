@@ -72,12 +72,18 @@ object NativeAlarmScheduler {
     recordEvent(context, routine, "triggered")
     val type = routine.optString("type")
     val behavior = routine.optString("reminderBehavior", "notification-only")
-    if (type == "alarm" && !capabilities(context)["exactAlarms"].toString().toBoolean()) { AlarmNotifications.postAlarmFallback(context, routine); return }
-    if (type != "alarm" && behavior == "notification-only") { AlarmNotifications.postReminder(context, routine); return }
-    if (type != "alarm" && !capabilities(context)["exactAlarms"].toString().toBoolean()) { AlarmNotifications.postReminder(context, routine); return }
+    val exactAlarmsAvailable = capabilities(context)["exactAlarms"].toString().toBoolean()
+    if (!shouldStartPlayback(type, behavior, exactAlarmsAvailable)) {
+      if (type == "alarm") AlarmNotifications.postAlarmFallback(context, routine)
+      else AlarmNotifications.postReminder(context, routine)
+      return
+    }
     val playback = playbackCopy(routine)
     if (!AlarmPlaybackService.start(context, playback, type == "alarm") && type != "alarm") AlarmNotifications.postReminder(context, routine)
   }
+
+  internal fun shouldStartPlayback(type: String, reminderBehavior: String, exactAlarmsAvailable: Boolean): Boolean =
+    type == "alarm" || (reminderBehavior == "spoken" && exactAlarmsAvailable)
 
   fun playbackCopy(routine: JSONObject): JSONObject {
     val playback = JSONObject(routine.toString())
