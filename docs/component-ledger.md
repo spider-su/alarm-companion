@@ -1,6 +1,6 @@
 # Component ledger
 
-This ledger distinguishes source-tested behavior from coverage provided by this starter. Update it when the template changes.
+This ledger distinguishes source-tested behavior from coverage provided by this starter. Update it when the template changes. Alarm Companion adapts template guidance selectively; this is not evidence that all template components were copied.
 
 | Component | Source / contract | Test evidence | Compatibility / adoption |
 |---|---|---|---|
@@ -8,6 +8,12 @@ This ledger distinguishes source-tested behavior from coverage provided by this 
 | Tab bar adds the reported bottom inset once and enforces minimum padding when inset is zero | Shared behavior; height and spacing remain app-configurable | Focused source tests in both apps; starter tests cover positive, zero, and negative inset inputs | Compare tab sizing with product design before adoption |
 | Modal/fallback screens account for system edges | Both apps' modal/safe-area conventions | Edge contract source tests; starter tests cover edge constants and modal padding | Modal windows need their own safe area; avoid consuming the same inset twice |
 | Theme, auth, API, persistence, notifications, telemetry, release identity | Intentionally omitted from starter | Not applicable | Add and verify per app; do not copy app credentials or product semantics |
+
+## October 2026 selective alignment
+
+- Adopted agent-oriented architecture ownership map and Android emulator / mobile quality skill instructions from the template, adapted for native exact alarms and voice playback.
+- Kept Alarm Companion-specific native alarm engine, persistence, UI and standalone APK CI. No runtime components were imported.
+- Validation of these documentation changes does not imply Android emulator or physical-device tests were executed.
 
 ## Validation status
 
