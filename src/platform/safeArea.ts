@@ -1,5 +1,11 @@
 /** The app frame owns the top inset; navigation owns its bottom inset. */
 export const appSafeAreaEdges = ['top'] as const;
+/** Use when bottom tabs are hidden and the app frame must own the bottom inset. */
+export const appSafeAreaEdgesWithoutTabs = ['top', 'bottom'] as const;
+export type BottomNavigationMode = 'visible-tabs' | 'hidden-tabs';
+export function appEdgesForNavigation(mode: BottomNavigationMode = 'visible-tabs') {
+  return mode === 'hidden-tabs' ? appSafeAreaEdgesWithoutTabs : appSafeAreaEdges;
+}
 /** Screens shown outside the app frame need both system edges. */
 export const fallbackSafeAreaEdges = ['top', 'bottom'] as const;
 /** Native modal windows need to handle both system edges themselves. */

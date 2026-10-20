@@ -13,3 +13,7 @@ This app already has product-specific components and native Android alarm module
 Prefer small component improvements in the existing screens: disabled/busy accessibility, labelled fields, readable errors and explicit destructive confirmation. Do not introduce a parallel component framework while Stage 7 redesign is underway.
 
 Validation: npm ci; npm run ci; npx expo-doctor; local APK build; targeted native alarm smoke. Report unverified device behavior explicitly.
+
+## POC hardening adopted from the mobile template
+
+See [mobile POC hardening](mobile-poc-hardening.md) for visible/hidden tab safe-area ownership, Settings scroll/reset, consistency and idempotent updates, native device regression, and Play AAB upgrade checks. Adopt the patterns in existing components, not by importing another app's navigation or storage layer.
