@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   appSafeAreaEdges,
+  appSafeAreaEdgesWithoutTabs,
+  appEdgesForNavigation,
   fallbackSafeAreaEdges,
   getModalBottomPadding,
   getTabBarMetrics,
@@ -10,6 +12,9 @@ import {
 describe('safe area layout contract', () => {
   it('assigns system edges to the correct owner', () => {
     expect(appSafeAreaEdges).toEqual(['top']);
+    expect(appSafeAreaEdgesWithoutTabs).toEqual(['top', 'bottom']);
+    expect(appEdgesForNavigation()).toEqual(['top']);
+    expect(appEdgesForNavigation('hidden-tabs')).toEqual(['top', 'bottom']);
     expect(fallbackSafeAreaEdges).toEqual(['top', 'bottom']);
     expect(modalSafeAreaEdges).toEqual(['top', 'bottom']);
   });
