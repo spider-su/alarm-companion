@@ -8,3 +8,7 @@ Alarm Companion is a focused personal/family alarm app. Read [engineering level]
 - Run npm ci and npm run ci. Check local Gradle APK CI and verify actual scheduled alarm speech on a physical Android device before claiming alarm reliability.
 - iOS simulator smoke: .codex/skills/ios-simulator-smoke/SKILL.md. iOS results do not prove Android exact alarm behavior.
 - Keep PRs reviewable and report CI/device test limitations. Human approval for merge.
+
+## Reusable mobile POC guardrails
+
+Before refactoring navigation, local state, notifications, or release flow, read [mobile POC hardening](docs/mobile-poc-hardening.md). Retain visible-tab inset ownership unless intentionally hiding tabs; never consume the bottom inset twice. Keep confirmed records and backend/native authority intact, verify scroll and Back behavior, and test updates without clearing local data. APK/CI success is not physical-device or Play AAB evidence.
