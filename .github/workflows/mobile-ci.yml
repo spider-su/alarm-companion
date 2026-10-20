@@ -6,15 +6,19 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: mobile-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -23,35 +27,59 @@ jobs:
 
   android-apk:
     needs: checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       CI: '1'
       EXPO_NO_TELEMETRY: '1'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
+      # Ubuntu 24.04 runners provide the SDK location, but cmdline-tools may
+      # not be installed. Install the official command-line tools explicitly.
+      - name: Install Android command-line tools
+        run: |
+          set -euo pipefail
+          : "${ANDROID_HOME:?ANDROID_HOME is not set}"
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          curl --fail --location --retry 3 --silent --show-error \
+            -o "$RUNNER_TEMP/android-commandlinetools.zip" \
+            "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+          unzip -q "$RUNNER_TEMP/android-commandlinetools.zip" -d "$RUNNER_TEMP/android-cmdline"
+          mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses > /dev/null || test "${PIPESTATUS[1]}" -eq 0
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
       - run: npm ci
       - name: Generate native Android project locally
         run: npx expo prebuild --clean --platform android
-      - name: Assemble debug APK on GitHub runner
+      # Assemble a standalone APK with an embedded JS bundle (no Metro server).
+      # Expo's generated Gradle template signs release builds with the Android
+      # debug keystore by default; this artifact is for device testing only.
+      - name: Assemble standalone test APK
         working-directory: android
-        run: ./gradlew --no-daemon assembleDebug
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        run: ./gradlew --no-daemon assembleRelease
+      - name: Verify standalone APK exists and is signed
+        run: |
+          set -euo pipefail
+          APK=$(find android/app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
+          test -n "$APK"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
+          echo "Standalone APK: $APK"
+      - name: Upload standalone Android APK
+        uses: actions/upload-artifact@v6
         with:
-          name: alarm-companion-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: alarm-companion-standalone-test-apk
+          path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: ${{ github.event_name == 'push' && 5 || 3 }}
