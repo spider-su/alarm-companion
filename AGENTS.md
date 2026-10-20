@@ -10,3 +10,11 @@ Alarm Companion is a focused personal/family alarm app. Read [architecture](docs
 - Mobile quality checks: .codex/skills/mobile-quality-checks/SKILL.md.
 - iOS simulator smoke: .codex/skills/ios-simulator-smoke/SKILL.md. iOS results do not prove Android exact alarm behavior.
 - Keep PRs reviewable and report CI/device test limitations. Human approval for merge.
+
+## Shared mobile-template conventions
+
+For new UI or agent-driven work, consult [architecture](docs/architecture.md), [component catalog](docs/component-catalog.md), [UI kit](docs/ui-kit.md), and [agent workflow](docs/agent-workflow.md). Use [agent handoff](docs/agent-handoff.template.md) for multi-session work and [release checklist](docs/release-checklist.md) before distribution.
+
+The [template project-level policy](docs/project-level.md) complements the app-specific [engineering level](docs/engineering-level.md). Existing native alarm and notification code is authoritative over generic template examples. Do not copy the template app identity, dependencies, or CI workflow over the app's working standalone APK build.
+
+For behavior changes add focused tests and report actual commands/results; run Expo Doctor when tooling permits. Keep private recordings and routine data out of test fixtures.
