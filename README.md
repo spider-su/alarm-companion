@@ -110,3 +110,7 @@ Automated checks cover TypeScript, lint, family template defaults and filtering,
 - [ ] Complete a milestone during alarm playback and confirm no celebration audio interrupts it (feedback is text-only).
 
 An Android 35 emulator smoke check verified app launch and the Home, Progress, Settings, Voice Library, and routine editor screens. Notification permission remained denied during that check, so scheduled completion and notification flows could not be exercised. In a separate user-reported physical-device check on 2026-10-10, voice preview and selection worked and an alarm set for 19:56 fired, but without its voice message. Device model, Android version, app state, and alarm configuration were not recorded. Treat scheduled voice playback as a known issue requiring reproduction. Locked-screen actions, process-death/reboot recovery, and general delivery reliability remain unverified end to end.
+
+## Agent and Android test workflows
+
+Start with [AGENTS.md](AGENTS.md) and [architecture map](docs/architecture.md). Reusable project-specific validation instructions are in [.codex/SKILLS.md](.codex/SKILLS.md), including Android emulator alarm smoke testing and Expo Doctor. CI builds a standalone release-variant APK signed with a debug key for testing, not store distribution. Real-device scheduled alarm and speech delivery must be verified separately.

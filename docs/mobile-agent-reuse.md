@@ -6,10 +6,10 @@ This app already has product-specific components and native Android alarm module
 - Domain: src/data/; preserve routine and voice formats.
 - Audio/native: src/audio/ and src/native/; never replace alarm delivery with generic Expo notifications.
 - Platform safe areas: src/platform/safeArea.ts; keep existing ownership.
-- CI: .github/workflows/mobile-ci.yml; native debug APK assembled by Gradle on GitHub runner.
-- Android verification: use the native emulator workflow, then test actual scheduled voice playback on a physical device.
+- CI: .github/workflows/mobile-ci.yml; standalone release-variant test APK assembled by Gradle on GitHub runner, signed with debug key.
+- Android verification: use .codex/skills/android-emulator-smoke/SKILL.md, then test actual scheduled voice playback on a physical device.
 - iOS verification: .codex/skills/ios-simulator-smoke/SKILL.md; iOS simulator cannot validate Android exact alarms.
 
 Prefer small component improvements in the existing screens: disabled/busy accessibility, labelled fields, readable errors and explicit destructive confirmation. Do not introduce a parallel component framework while Stage 7 redesign is underway.
 
-Validation: npm ci; npm run ci; npx expo-doctor; local APK build; targeted native alarm smoke. Report unverified device behavior explicitly.
+Validation: npm ci; npm run ci; npx expo-doctor; GitHub runner standalone APK build; targeted native alarm smoke. See docs/architecture.md for ownership and .codex/SKILLS.md for repeatable workflows. Report unverified device behavior explicitly.
