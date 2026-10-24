@@ -18,3 +18,7 @@ For new UI or agent-driven work, consult [architecture](docs/architecture.md), [
 The [template project-level policy](docs/project-level.md) complements the app-specific [engineering level](docs/engineering-level.md). Existing native alarm and notification code is authoritative over generic template examples. Do not copy the template app identity, dependencies, or CI workflow over the app's working standalone APK build.
 
 For behavior changes add focused tests and report actual commands/results; run Expo Doctor when tooling permits. Keep private recordings and routine data out of test fixtures.
+
+## Reusable mobile POC guardrails
+
+Before refactoring navigation, local state, notifications, or release flow, read [mobile POC hardening](docs/mobile-poc-hardening.md). Retain visible-tab inset ownership unless intentionally hiding tabs; never consume the bottom inset twice. Keep confirmed records and backend/native authority intact, verify scroll and Back behavior, and test updates without clearing local data. APK/CI success is not physical-device or Play AAB evidence.
