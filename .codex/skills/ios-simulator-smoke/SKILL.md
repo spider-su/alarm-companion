@@ -12,3 +12,7 @@ description: Smoke-test Alarm Companion on an iOS Simulator with disposable synt
 5. Use synthetic family names and voice recordings. Do not clear real user data or upload private audio.
 6. Capture evidence with xcrun simctl io <UDID> screenshot <path>.
 7. Report PASS/FAIL/BLOCKED/SKIPPED and limitations. iOS simulator cannot verify Android exact alarms, lock-screen activity or physical-device scheduled voice playback.
+
+## Cross-platform navigation checks
+
+When available, verify long Settings screens, safe-area ownership with visible tabs, nested Back behavior, and preserving selected routine/voice state through navigation. Record simulator evidence separately from physical-device testing; iOS simulation does not establish native Android alarm reliability.
