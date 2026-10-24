@@ -9,6 +9,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug,
   version: process.env.APP_VERSION ?? '1.0.0',
   orientation: 'portrait',
+  icon: './assets/alarm-companion-icon.png',
   userInterfaceStyle: 'automatic',
   ios: {
     ...config.ios,
@@ -19,6 +20,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     ...config.android,
     package: process.env.ANDROID_PACKAGE ?? 'com.spidersu.alarmcompanion',
+    adaptiveIcon: {
+      foregroundImage: './assets/alarm-companion-icon-foreground.png',
+      backgroundColor: '#073B27'
+    },
     permissions: ['POST_NOTIFICATIONS', 'VIBRATE'],
     blockedPermissions: ['android.permission.SYSTEM_ALERT_WINDOW', 'android.permission.READ_EXTERNAL_STORAGE', 'android.permission.WRITE_EXTERNAL_STORAGE']
   },

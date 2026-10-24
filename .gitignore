@@ -3,6 +3,7 @@ node_modules/
 dist/
 web-build/
 coverage/
+/artifacts/
 *.log
 .env
 .env.*
